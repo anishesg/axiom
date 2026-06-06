@@ -2,11 +2,46 @@ import { create } from 'zustand';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'streaming' | 'error';
 
+// Mapped from axiom server's jaw_clench/double_clench to Eleven's control signals
 export type ControlSignal = 'double_blink' | 'triple_blink' | 'jaw_clench' | 'long_jaw_clench';
 
-interface AttentionData {
+// Brain state from axiom server (brain_state.py)
+export interface BrainState {
+  engagement: number;
   focus: number;
   relaxation: number;
+  cognitive_load: number;
+  valence: number;
+  jaw_clench: boolean;
+  double_clench: boolean;
+  context_switch: boolean;
+  error_response: boolean;
+}
+
+// EEG band powers
+export interface BandPowers {
+  delta: number;
+  theta: number;
+  alpha: number;
+  beta: number;
+  gamma: number;
+}
+
+// Learning/agent metrics
+export interface LearningMetrics {
+  accuracy: number;
+  totalActions: number;
+  undoneActions: number;
+  mode: string;
+}
+
+// Agent action
+export interface AgentAction {
+  action_type: string;
+  target: string | null;
+  confidence: number;
+  reason: string;
+  timestamp: number;
 }
 
 interface SessionState {
@@ -14,10 +49,17 @@ interface SessionState {
   connectionState: ConnectionState;
   signalStrength: number;
 
-  // Attention metrics
-  attention: AttentionData;
+  // Brain state (from axiom server)
+  brainState: BrainState;
+  bandPowers: BandPowers;
 
-  // Latest control signal
+  // Learning metrics
+  learningMetrics: LearningMetrics;
+
+  // Latest agent action
+  lastAction: AgentAction | null;
+
+  // Latest control signal (mapped from brain state)
   lastControlSignal: ControlSignal | null;
   lastSignalTimestamp: number | null;
 
@@ -25,24 +67,68 @@ interface SessionState {
   isCalibrated: boolean;
   calibrationProgress: number;
 
+  // Server info
+  serverInfo: {
+    channels: string[];
+    sampleRate: number;
+    gazeEnabled: boolean;
+    llmEnabled: boolean;
+    osActionsEnabled: boolean;
+  } | null;
+
   // Actions
   setConnectionState: (state: ConnectionState) => void;
   setSignalStrength: (strength: number) => void;
-  setAttention: (attention: AttentionData) => void;
+  setBrainState: (state: BrainState) => void;
+  setBandPowers: (bands: BandPowers) => void;
+  setLearningMetrics: (metrics: LearningMetrics) => void;
+  setLastAction: (action: AgentAction) => void;
   setControlSignal: (signal: ControlSignal) => void;
   setCalibrated: (calibrated: boolean) => void;
   setCalibrationProgress: (progress: number) => void;
+  setServerInfo: (info: SessionState['serverInfo']) => void;
   reset: () => void;
 }
+
+const initialBrainState: BrainState = {
+  engagement: 0,
+  focus: 0,
+  relaxation: 0,
+  cognitive_load: 0,
+  valence: 0,
+  jaw_clench: false,
+  double_clench: false,
+  context_switch: false,
+  error_response: false,
+};
+
+const initialBandPowers: BandPowers = {
+  delta: 0,
+  theta: 0,
+  alpha: 0,
+  beta: 0,
+  gamma: 0,
+};
+
+const initialLearningMetrics: LearningMetrics = {
+  accuracy: 0,
+  totalActions: 0,
+  undoneActions: 0,
+  mode: 'passive',
+};
 
 const initialState = {
   connectionState: 'disconnected' as ConnectionState,
   signalStrength: 0,
-  attention: { focus: 0, relaxation: 0 },
+  brainState: initialBrainState,
+  bandPowers: initialBandPowers,
+  learningMetrics: initialLearningMetrics,
+  lastAction: null,
   lastControlSignal: null,
   lastSignalTimestamp: null,
   isCalibrated: false,
   calibrationProgress: 0,
+  serverInfo: null,
 };
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -52,7 +138,13 @@ export const useSessionStore = create<SessionState>((set) => ({
 
   setSignalStrength: (signalStrength) => set({ signalStrength }),
 
-  setAttention: (attention) => set({ attention }),
+  setBrainState: (brainState) => set({ brainState }),
+
+  setBandPowers: (bandPowers) => set({ bandPowers }),
+
+  setLearningMetrics: (learningMetrics) => set({ learningMetrics }),
+
+  setLastAction: (lastAction) => set({ lastAction }),
 
   setControlSignal: (signal) =>
     set({
@@ -64,5 +156,13 @@ export const useSessionStore = create<SessionState>((set) => ({
 
   setCalibrationProgress: (calibrationProgress) => set({ calibrationProgress }),
 
+  setServerInfo: (serverInfo) => set({ serverInfo }),
+
   reset: () => set(initialState),
 }));
+
+// Selector for attention (derived from brain state for backward compatibility)
+export const selectAttention = (state: SessionState) => ({
+  focus: state.brainState.focus,
+  relaxation: state.brainState.relaxation,
+});

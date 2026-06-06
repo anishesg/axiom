@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { SignalStrength } from '../components/ui/SignalStrength';
 import { ConfirmationModal } from '../components/ui/ConfirmationModal';
+import { useSessionStore } from '../stores/sessionStore';
+import { useElevenSocket } from '../hooks/useElevenSocket';
 
 interface Message {
   id: string;
@@ -51,6 +53,39 @@ export function CommunicationHub() {
   const [selectedPhrase, setSelectedPhrase] = useState<Phrase | null>(null);
   const [focusedPhraseId, setFocusedPhraseId] = useState<string | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
+
+  // Axiom connectivity
+  const { connect } = useElevenSocket();
+  const { connectionState, signalStrength, brainState, lastControlSignal, lastSignalTimestamp } = useSessionStore();
+
+  // Connect to axiom server on mount
+  useEffect(() => {
+    connect();
+  }, [connect]);
+
+  // Handle control signals from EEG
+  useEffect(() => {
+    if (!lastControlSignal || !lastSignalTimestamp) return;
+
+    // Only react to recent signals (within last 2 seconds)
+    const age = Date.now() - lastSignalTimestamp;
+    if (age > 2000) return;
+
+    if (showConfirmation) {
+      // In confirmation mode
+      if (lastControlSignal === 'double_blink' || lastControlSignal === 'jaw_clench') {
+        handleConfirm();
+      } else if (lastControlSignal === 'triple_blink' || lastControlSignal === 'long_jaw_clench') {
+        handleCancel();
+      }
+    } else if (focusedPhraseId) {
+      // Phrase is focused - select it on jaw clench
+      if (lastControlSignal === 'jaw_clench') {
+        const phrase = PHRASES.find(p => p.id === focusedPhraseId);
+        if (phrase) handlePhraseSelect(phrase);
+      }
+    }
+  }, [lastControlSignal, lastSignalTimestamp]);
 
   const filteredPhrases = PHRASES.filter((p) => p.category === activeTab);
 
@@ -103,6 +138,14 @@ export function CommunicationHub() {
     }
   };
 
+  const connectionLabel = {
+    disconnected: 'Disconnected',
+    connecting: 'Connecting...',
+    connected: 'Connected',
+    streaming: 'Streaming',
+    error: 'Error',
+  }[connectionState];
+
   return (
     <div className="bg-background text-on-background overflow-hidden h-screen flex flex-col">
       {/* TopAppBar */}
@@ -113,13 +156,26 @@ export function CommunicationHub() {
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 bg-primary rounded-full signal-pulse" />
-          <span className="text-label-sm uppercase tracking-widest">Connected</span>
+        {/* Brain State Indicators */}
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${connectionState === 'streaming' ? 'bg-primary signal-pulse' : 'bg-secondary-container'}`} />
+            <span className="text-label-sm uppercase tracking-widest">{connectionLabel}</span>
+          </div>
+
+          {connectionState === 'streaming' && (
+            <div className="flex items-center gap-4 text-label-sm text-on-surface-variant">
+              <span>Focus: <strong className="text-primary">{Math.round(brainState.focus * 100)}%</strong></span>
+              <span>Relax: <strong className="text-primary">{Math.round(brainState.relaxation * 100)}%</strong></span>
+              {brainState.jaw_clench && (
+                <span className="text-primary font-bold uppercase animate-pulse">JAW</span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-gutter">
-          <SignalStrength level={4} maxLevel={4} />
+          <SignalStrength level={signalStrength} maxLevel={4} />
           <button className="material-symbols-outlined text-primary p-2">
             volume_up
           </button>
