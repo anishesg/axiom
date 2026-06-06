@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+dist/
+*.egg-info/
+.env
+*.npz
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Frontend build
+frontend/dist/
