@@ -48,6 +48,7 @@ except ImportError:
 
 SIM_MODE = "--sim" in sys.argv
 USE_LLM = "--llm" in sys.argv or os.environ.get("USE_LLM")
+TEST_MODE = "--test" in sys.argv
 EEG_SR = 256
 GAZE_HZ = 15
 BRAIN_HZ = 2
@@ -384,6 +385,31 @@ class _StubNeuralUCBBandit:
 # ── Main BCI Server ──────────────────────────────────────────────
 
 class AxiomV2:
+    @staticmethod
+    def _detect_screen_size() -> tuple[int, int]:
+        try:
+            import subprocess
+            out = subprocess.check_output(
+                ["system_profiler", "SPDisplaysDataType"],
+                text=True, timeout=5
+            )
+            for line in out.splitlines():
+                if "UI Looks like:" in line:
+                    parts = line.split()
+                    w, h = int(parts[3]), int(parts[5])
+                    print(f"[SCREEN] Detected {w}x{h} (effective)", flush=True)
+                    return w, h
+                if "Resolution" in line and "x" in line:
+                    parts = line.split()
+                    idx = parts.index("x")
+                    w, h = int(parts[idx - 1]), int(parts[idx + 1])
+                    print(f"[SCREEN] Detected {w}x{h}", flush=True)
+                    return w, h
+        except Exception:
+            pass
+        print("[SCREEN] Using default 1440x900", flush=True)
+        return 1440, 900
+
     def __init__(self, sim=False):
         self.phase = "startup"
         self.sim = sim
@@ -391,7 +417,8 @@ class AxiomV2:
         # Core components
         self.eeg = EEGSource(sim=sim)
         self.brain_engine = BrainStateEngine()
-        self.gaze = GazeTracker(screen_w=2560, screen_h=1440)
+        screen_w, screen_h = self._detect_screen_size()
+        self.gaze = GazeTracker(screen_w=screen_w, screen_h=screen_h)
         self.controller = UniversalController()
         self.fixation = FixationDetector()
         self.llm = None
@@ -455,7 +482,11 @@ class AxiomV2:
         await self._broadcast_system("Launching browser...")
         try:
             await self.controller.start()
-            await self._broadcast_system("Browser ready")
+            if TEST_MODE:
+                await self.controller.navigate_to("http://localhost:8080")
+                await self._broadcast_system("Browser ready — loaded test site")
+            else:
+                await self._broadcast_system("Browser ready")
         except Exception as e:
             await self._broadcast_system(f"Browser error: {e}")
 

@@ -8,6 +8,10 @@ dist/
 .env
 *.npz
 *.log
+*.task
+
+# Browser profile
+data/chrome_profile/
 
 # IDE
 .vscode/
