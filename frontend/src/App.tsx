@@ -141,6 +141,7 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [phase, setPhase] = useState("startup");
   const [sim, setSim] = useState(false);
+  const [bridge, setBridge] = useState(false);
   const [brain, setBrain] = useState<BrainState>(ZERO_BRAIN);
   const [gaze, setGaze] = useState<GazeState | null>(null);
   const [page, setPage] = useState<PageState | null>(null);
@@ -176,6 +177,7 @@ export default function App() {
           case "init":
             setPhase(d.phase);
             setSim(d.sim);
+            setBridge(d.bridge || false);
             setActions(d.action_log || []);
             break;
           case "system":
@@ -291,6 +293,7 @@ export default function App() {
         </div>
         <div className="header-right">
           <span className={`phase-badge phase-${phase}`}>{phase.toUpperCase()}</span>
+          {bridge && <span className="bridge-badge">BRIDGE</span>}
           <span className={`conn-dot ${connected ? "on" : "off"}`} />
           <span className="conn-label">{connected ? (sim ? "SIM" : "LIVE") : "OFFLINE"}</span>
         </div>

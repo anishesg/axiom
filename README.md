@@ -86,14 +86,30 @@ Go to **http://localhost:5173** in a separate browser window. You'll see:
 
 ### 5. Run with Real Muse S
 
+The Bluetooth connection runs as a **separate persistent process** (`muse_bridge.py`) so you can restart the backend without losing the BT link — the hardest part of Muse development.
+
 ```bash
 # Turn on your Muse S headband (hold power button until LED pulses)
 # Make sure Bluetooth is on
 
+# Option A: start_v2.sh handles everything (starts bridge automatically)
 ./start_v2.sh --test
+
+# Option B: run bridge separately (recommended for development)
+python backend/muse_bridge.py          # Connects to Muse, runs forever
+# In another terminal:
+./start_v2.sh --test                   # Detects bridge, uses it automatically
 ```
 
-The system auto-discovers the Muse S via Bluetooth (BrainFlow). If connection fails:
+The bridge stays alive when you Ctrl+C the backend. Restart axiom_v2.py as many times as you want — BT stays connected.
+
+```bash
+python backend/muse_bridge.py --status  # Check bridge status
+python backend/muse_bridge.py --stop    # Disconnect Muse and stop bridge
+python backend/muse_bridge.py --sim     # Run bridge with simulated EEG
+```
+
+If connection fails:
 - Make sure no other app (Muse Direct, Mind Monitor) is connected to it
 - Turn the Muse off and on again
 - Check Bluetooth is enabled in macOS settings
@@ -140,6 +156,7 @@ Clench your jaw firmly for an explicit "click" — detected as EMG artifact at t
 muse-brain/
 ├── backend/
 │   ├── axiom_v2.py              # Main orchestrator (6 async loops)
+│   ├── muse_bridge.py           # Persistent BT process (shared memory EEG stream)
 │   ├── universal_controller.py  # Playwright browser control via accessibility tree
 │   ├── neural_pipeline.py       # EEGNet + HMM + UCB + Intent + ErrP
 │   ├── brain_state.py           # Basic EEG band power features

@@ -59,6 +59,7 @@ body {
 .conn-dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .conn-dot.off { background: var(--red); }
 .conn-label { font-size: 10px; color: var(--text-dim); letter-spacing: 1px; }
+.bridge-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: rgba(0, 212, 255, 0.15); color: var(--cyan); border: 1px solid rgba(0, 212, 255, 0.3); letter-spacing: 1px; }
 
 /* ── 3-Column Layout ────────────────────────────────────────── */
 

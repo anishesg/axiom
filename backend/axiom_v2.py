@@ -32,6 +32,7 @@ from brain_state import BrainStateEngine, BrainState
 from gaze_tracker import GazeTracker, GazeResult
 from universal_controller import UniversalController, WebElement
 from llm_engine import AxiomLLM
+from muse_bridge import EEGBridgeClient, is_bridge_running
 
 # Neural pipeline components — imported with fallback stubs
 try:
@@ -414,8 +415,12 @@ class AxiomV2:
         self.phase = "startup"
         self.sim = sim
 
-        # Core components
-        self.eeg = EEGSource(sim=sim)
+        # Core components — use bridge for persistent BT, fall back to direct
+        if not sim and is_bridge_running():
+            print("[AXIOM] Using muse_bridge for EEG (persistent BT)", flush=True)
+            self.eeg = EEGBridgeClient(sim=False)
+        else:
+            self.eeg = EEGSource(sim=sim)
         self.brain_engine = BrainStateEngine()
         screen_w, screen_h = self._detect_screen_size()
         self.gaze = GazeTracker(screen_w=screen_w, screen_h=screen_h)
@@ -938,10 +943,12 @@ class AxiomV2:
     async def handle_ws(self, ws):
         clients.add(ws)
         print(f"Dashboard connected ({len(clients)})", flush=True)
+        bridge_active = isinstance(self.eeg, EEGBridgeClient) and not self.eeg._sim
         await ws.send(json.dumps({
             "type": "init",
             "phase": self.phase,
             "sim": self.sim,
+            "bridge": bridge_active,
             "thresholds": self.thresholds,
             "action_log": self._action_log[-20:],
             "supported_actions": SUPPORTED_ACTIONS,
