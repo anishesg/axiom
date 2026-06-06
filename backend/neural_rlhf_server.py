@@ -26,12 +26,14 @@ from brain_state import BrainStateEngine
 from neural_reward import NeuralRewardComputer
 from agent_arena import AgentArena
 
+HAS_WEAVE = False
 try:
     import weave
-    weave.init("neural-rlhf")
-    HAS_WEAVE = True
+    if os.environ.get("WANDB_API_KEY"):
+        weave.init("neural-rlhf")
+        HAS_WEAVE = True
 except Exception:
-    HAS_WEAVE = False
+    pass
 
 try:
     import redis as redis_lib

@@ -81,9 +81,16 @@ class AgentState:
 
 class AgentArena:
     def __init__(self, api_key: str = None):
-        self.client = OpenAI(api_key=api_key) if api_key else OpenAI()
+        self._api_key = api_key
+        self._client = None
         self.agents = {cfg["id"]: AgentState(config=cfg) for cfg in AGENT_CONFIGS}
         self.round_history = []
+
+    @property
+    def client(self):
+        if self._client is None:
+            self._client = OpenAI(api_key=self._api_key) if self._api_key else OpenAI()
+        return self._client
 
     def _generate_one(self, agent: AgentState, topic: str, round_num: int) -> str:
         messages = [
