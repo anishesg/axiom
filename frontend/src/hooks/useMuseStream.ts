@@ -71,7 +71,7 @@ export function useMuseStream() {
   const [lastAction, setLastAction] = useState<AgentAction | null>(null);
   const [learning, setLearning] = useState<LearningMetrics | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;

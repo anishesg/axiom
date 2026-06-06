@@ -1,51 +1,68 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-interface Agent {
-  id: string;
-  name: string;
-  emoji: string;
-  color: string;
-}
 interface BrainState {
   engagement: number;
   focus: number;
   valence: number;
   cognitive_load: number;
   relaxation: number;
+  jaw_clench: boolean;
+  error_response: number;
 }
-interface AgentResponse extends Agent {
-  text: string;
+
+interface GazeState {
+  screen_x: number;
+  screen_y: number;
+  viewport_x: number;
+  viewport_y: number;
+  fixating: boolean;
+  fixation_duration: number;
+  element: { id: string; type: string; label: string } | null;
+  confidence: number;
 }
-interface Reward {
-  agent_id: string;
+
+interface GmailState {
+  view: string;
+  element_count: number;
+  unread_count: number;
+  selected_email: Record<string, string>;
+  elements: { id: string; type: string; label: string; bbox: Record<string, number> }[];
+}
+
+interface ActionEntry {
+  action: string;
+  target: string;
+  confidence: number;
+  reason: string;
+  timestamp: number;
+  result?: string;
+}
+
+interface IntentRing {
+  element_id: string;
+  element_label: string;
+  progress: number;
+  intent: string;
+  confidence: number;
   engagement: number;
-  valence: number;
-  focus: number;
-  cognitive_load: number;
-  relaxation: number;
-  total: number;
-  n_samples: number;
 }
-interface RoundResult {
-  round: number;
-  winner: string | null;
-  rewards: Record<string, number>;
-  topic?: string;
+
+interface CalState {
+  type: string;
+  targets?: { x: number; y: number }[];
+  total?: number;
+  stats?: Record<string, number>;
+  results?: Record<string, unknown>;
+  action?: string;
 }
 
 const ZERO_BRAIN: BrainState = {
-  engagement: 0,
-  focus: 0,
-  valence: 0.5,
-  cognitive_load: 0,
-  relaxation: 0,
+  engagement: 0, focus: 0, valence: 0.5,
+  cognitive_load: 0, relaxation: 0,
+  jaw_clench: false, error_response: 0,
 };
 
-const BRAIN_METRICS: {
-  key: keyof BrainState;
-  label: string;
-  color: string;
-}[] = [
+const BRAIN_METRICS: { key: keyof BrainState; label: string; color: string; }[] = [
   { key: "engagement", label: "Engagement", color: "#00d4ff" },
   { key: "focus", label: "Focus", color: "#a855f7" },
   { key: "valence", label: "Valence", color: "#ff6b9d" },
@@ -55,29 +72,18 @@ const BRAIN_METRICS: {
 
 export default function App() {
   const [connected, setConnected] = useState(false);
-  const [phase, setPhase] = useState("idle");
+  const [phase, setPhase] = useState("startup");
   const [brain, setBrain] = useState<BrainState>(ZERO_BRAIN);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [responses, setResponses] = useState<AgentResponse[]>([]);
-  const [readingTarget, setReadingTarget] = useState<string | null>(null);
-  const [readingIdx, setReadingIdx] = useState(0);
-  const [readingTotal, setReadingTotal] = useState(0);
-  const [readingProgress, setReadingProgress] = useState(0);
-  const [readingRemaining, setReadingRemaining] = useState(0);
-  const [rewards, setRewards] = useState<Reward[]>([]);
-  const [winner, setWinner] = useState<string | null>(null);
-  const [round, setRound] = useState(0);
-  const [maxRounds, setMaxRounds] = useState(5);
-  const [history, setHistory] = useState<RoundResult[]>([]);
-  const [topics, setTopics] = useState<string[]>([]);
-  const [topicInput, setTopicInput] = useState("");
-  const [calProgress, setCalProgress] = useState(0);
-  const [adaptations, setAdaptations] = useState<Record<string, string>>({});
-  const [agentStats, setAgentStats] = useState<
-    Record<string, { wins: number; rounds: number; avg_reward: number }>
-  >({});
-  const [simMode, setSimMode] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [gaze, setGaze] = useState<GazeState | null>(null);
+  const [gmail, setGmail] = useState<GmailState | null>(null);
+  const [actions, setActions] = useState<ActionEntry[]>([]);
+  const [intentRing, setIntentRing] = useState<IntentRing | null>(null);
+  const [calState, setCalState] = useState<CalState | null>(null);
+  const [calPointIdx, setCalPointIdx] = useState(0);
+  const [systemLog, setSystemLog] = useState<string[]>([]);
+  const [errp, setErrp] = useState<string | null>(null);
+  const [sim, setSim] = useState(false);
+  const [, setThresholds] = useState<Record<string, number>>({});
   const wsRef = useRef<WebSocket | null>(null);
 
   const send = useCallback((data: Record<string, unknown>) => {
@@ -87,524 +93,267 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let reconnectTimer: ReturnType<typeof setTimeout>;
-    function tryConnect() {
-      const ws = new WebSocket("ws://127.0.0.1:8080");
+    let timer: ReturnType<typeof setTimeout>;
+    function connect() {
+      const ws = new WebSocket("ws://127.0.0.1:8765");
       wsRef.current = ws;
       ws.onopen = () => setConnected(true);
-      ws.onclose = () => {
-        setConnected(false);
-        reconnectTimer = setTimeout(tryConnect, 3000);
-      };
+      ws.onclose = () => { setConnected(false); timer = setTimeout(connect, 2000); };
       ws.onmessage = (e) => {
         const d = JSON.parse(e.data);
         switch (d.type) {
           case "init":
-            setAgents(d.agents);
-            setMaxRounds(d.max_rounds);
-            setRound(d.round);
-            setSimMode(d.sim_mode);
-            if (d.topics) setTopics(d.topics);
-            if (d.history) setHistory(d.history);
-            if (d.phase && d.phase !== "idle") setPhase(d.phase);
+            setPhase(d.phase); setSim(d.sim);
+            setThresholds(d.thresholds || {});
+            setActions(d.action_log || []);
             break;
-          case "phase":
+          case "system":
             setPhase(d.phase);
-            if (d.round) setRound(d.round);
-            if (d.history) setHistory(d.history);
-            if (d.agent_stats) setAgentStats(d.agent_stats);
+            setSystemLog(prev => [...prev.slice(-30), d.status]);
             break;
           case "brain":
             setBrain({
-              engagement: d.engagement,
-              focus: d.focus,
-              valence: d.valence,
-              cognitive_load: d.cognitive_load,
-              relaxation: d.relaxation,
+              engagement: d.engagement, focus: d.focus, valence: d.valence,
+              cognitive_load: d.cognitive_load, relaxation: d.relaxation,
+              jaw_clench: d.jaw_clench, error_response: d.error_response,
             });
             break;
-          case "responses":
-            setResponses(d.responses);
-            if (d.round) setRound(d.round);
+          case "gaze":
+            setGaze(d as GazeState);
             break;
-          case "reading_target":
-            setReadingTarget(d.agent_id);
-            setReadingIdx(d.agent_idx);
-            setReadingTotal(d.total_agents);
-            setReadingProgress(0);
-            setReadingRemaining(d.duration);
+          case "gmail":
+            setGmail(d as GmailState);
             break;
-          case "reading_progress":
-            setReadingProgress(d.progress);
-            setReadingRemaining(d.remaining);
+          case "action":
+            setActions(prev => [...prev.slice(-50), d as ActionEntry]);
             break;
-          case "rewards":
-            setRewards(d.rewards);
-            setWinner(d.winner);
-            setPhase("results");
+          case "intent_ring":
+            setIntentRing(d as IntentRing);
             break;
-          case "round_complete":
-            setAdaptations(d.adaptations || {});
-            if (d.history) setHistory(d.history);
-            if (d.agent_stats) setAgentStats(d.agent_stats);
+          case "errp":
+            setErrp(`Undoing: ${d.undoing} on ${d.target}`);
+            setTimeout(() => setErrp(null), 3000);
             break;
-          case "calibration_progress":
-            setCalProgress(d.progress);
-            break;
-          case "error":
-            setError(d.message);
-            setTimeout(() => setError(null), 5000);
+          case "calibration":
+            setCalState(d as CalState);
+            if (d.type === "gaze_done" || d.type === "eeg_done") {
+              setPhase("live");
+            }
             break;
         }
       };
     }
-    tryConnect();
-    return () => {
-      clearTimeout(reconnectTimer);
-      wsRef.current?.close();
-    };
+    connect();
+    return () => { clearTimeout(timer); wsRef.current?.close(); };
   }, []);
 
-  const readingResp = responses.find((r) => r.id === readingTarget);
-  const showBrain = phase !== "idle" && phase !== "complete";
+  const gazeCalTargets = calState?.targets || [];
+  const isGazeCal = phase === "gaze_cal" && gazeCalTargets.length > 0;
 
   return (
     <div className="app">
       <header className="header">
         <div className="header-left">
           <h1 className="title">
-            NEURAL<span className="title-accent">RLHF</span>
+            AXIOM<span className="title-accent">.GMAIL</span>
           </h1>
-          <span className="subtitle">Your Brain as the Reward Model</span>
+          <span className="subtitle">Brain-Computer Interface</span>
         </div>
         <div className="header-right">
-          {round > 0 && (
-            <span className="round-badge">
-              ROUND {round}/{maxRounds}
-            </span>
-          )}
+          <span className={`phase-badge phase-${phase}`}>{phase.toUpperCase()}</span>
           <span className={`conn-dot ${connected ? "on" : "off"}`} />
-          <span className="conn-label">
-            {connected ? (simMode ? "SIM" : "LIVE") : "OFFLINE"}
-          </span>
+          <span className="conn-label">{connected ? (sim ? "SIM" : "LIVE") : "OFFLINE"}</span>
         </div>
       </header>
 
       <div className="main">
-        {showBrain && (
-          <div className="brain-panel">
-            {BRAIN_METRICS.map(({ key, label, color }) => (
+        {/* Brain State Panel */}
+        <div className="brain-panel">
+          <h3 className="panel-title">Neural State</h3>
+          {BRAIN_METRICS.map(({ key, label, color }) => {
+            const v = typeof brain[key] === "number" ? (brain[key] as number) : 0;
+            return (
               <div key={key} className="brain-metric">
                 <div className="bm-head">
                   <span className="bm-label">{label}</span>
-                  <span className="bm-val" style={{ color }}>
-                    {Math.round(brain[key] * 100)}%
-                  </span>
+                  <span className="bm-val" style={{ color }}>{Math.round(v * 100)}%</span>
                 </div>
                 <div className="bm-track">
-                  <div
-                    className="bm-fill"
-                    style={{
-                      width: `${brain[key] * 100}%`,
-                      background: color,
-                      boxShadow: `0 0 10px ${color}50`,
-                    }}
-                  />
+                  <div className="bm-fill" style={{ width: `${v * 100}%`, background: color, boxShadow: `0 0 10px ${color}50` }} />
                 </div>
               </div>
-            ))}
-          </div>
-        )}
+            );
+          })}
 
-        <div className="content">
-          {phase === "idle" && (
-            <div className="idle">
-              <div className="idle-icon">{"\u{1F9E0}"}</div>
-              <h2>NEURAL RLHF</h2>
-              <p>
-                Put on your Muse S headband. Three AI agents will compete to
-                explain topics &mdash; your brain&apos;s neural response picks
-                the winner. No clicking, no typing. Just thinking.
-              </p>
-              <div className="idle-btns">
-                <button
-                  className="btn btn-p"
-                  onClick={() => send({ command: "start_calibration" })}
-                >
-                  Calibrate Baseline
-                </button>
-                <button
-                  className="btn btn-s"
-                  onClick={() => send({ command: "skip_calibration" })}
-                >
-                  Skip &rarr; Demo
-                </button>
+          {brain.jaw_clench && <div className="clench-indicator">JAW CLENCH</div>}
+          {brain.error_response > 0.5 && <div className="errp-indicator">ErrP DETECTED</div>}
+
+          <div className="brain-divider" />
+          <h3 className="panel-title">Gaze</h3>
+          {gaze ? (
+            <div className="gaze-info">
+              <div className="gaze-row">
+                <span>Position</span>
+                <span>{Math.round(gaze.screen_x)}, {Math.round(gaze.screen_y)}</span>
               </div>
-            </div>
-          )}
-
-          {phase === "calibrating" && (
-            <div className="calibrate">
-              <div className="cal-ring-wrap">
-                <svg className="cal-ring-bg" viewBox="0 0 140 140">
-                  <circle cx="70" cy="70" r="60" />
-                </svg>
-                <svg className="cal-ring-fg" viewBox="0 0 140 140">
-                  <circle
-                    cx="70"
-                    cy="70"
-                    r="60"
-                    strokeDasharray={`${2 * Math.PI * 60}`}
-                    strokeDashoffset={`${
-                      2 * Math.PI * 60 * (1 - calProgress)
-                    }`}
-                  />
-                </svg>
-                <span className="cal-pct">
-                  {Math.round(calProgress * 100)}%
+              <div className="gaze-row">
+                <span>Fixating</span>
+                <span className={gaze.fixating ? "gaze-fix" : "gaze-nofix"}>
+                  {gaze.fixating ? `YES (${gaze.fixation_duration.toFixed(1)}s)` : "NO"}
                 </span>
               </div>
-              <h2>Calibrating Baseline</h2>
-              <p>Relax and breathe normally. Recording resting brain state.</p>
+              {gaze.element && (
+                <div className="gaze-element">
+                  <span className="ge-type">{gaze.element.type}</span>
+                  <span className="ge-label">{gaze.element.label.slice(0, 40)}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="gaze-uncal">Not calibrated</p>
+          )}
+
+          <div className="brain-divider" />
+          <div className="panel-actions">
+            <button className="btn btn-sm btn-s" onClick={() => send({ command: "start_gaze_cal" })}>
+              Calibrate Gaze
+            </button>
+            <button className="btn btn-sm btn-s" onClick={() => send({ command: "start_eeg_cal" })}>
+              Calibrate EEG
+            </button>
+            <button className="btn btn-sm btn-s" onClick={() => send({ command: "set_phase", phase: "live" })}>
+              Go Live
+            </button>
+          </div>
+        </div>
+
+        {/* Center Content */}
+        <div className="content">
+          {/* Gaze Calibration */}
+          {isGazeCal && (
+            <div className="gaze-cal-overlay">
+              <p className="cal-instruction">Look at each dot and press SPACE when ready</p>
+              {gazeCalTargets.map((t, i) => (
+                <div key={i} className={`cal-dot ${i === calPointIdx ? "active" : i < calPointIdx ? "done" : ""}`}
+                  style={{ left: `${(t.x / 2560) * 100}%`, top: `${(t.y / 1440) * 100}%` }}
+                  onClick={() => {
+                    send({ command: "gaze_point", x: t.x, y: t.y });
+                    setCalPointIdx(i + 1);
+                  }} />
+              ))}
             </div>
           )}
 
-          {phase === "ready" && (
-            <div className="ready">
-              <h2>{round === 0 ? "Choose a Topic" : `Round ${round + 1}`}</h2>
-              <p>
-                Three AI agents will compete to explain this. Your brain picks
-                the winner.
-              </p>
-              <div className="topic-row">
-                <input
-                  className="topic-input"
-                  value={topicInput}
-                  onChange={(e) => setTopicInput(e.target.value)}
-                  placeholder="Type a topic or pick one below..."
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && topicInput.trim())
-                      send({ command: "start_round", topic: topicInput });
-                  }}
-                />
-                <button
-                  className="btn btn-p"
-                  disabled={!topicInput.trim()}
-                  onClick={() =>
-                    send({ command: "start_round", topic: topicInput })
-                  }
-                >
-                  Go
-                </button>
-              </div>
-              <div className="topic-presets">
-                {topics.map((t, i) => (
-                  <button
-                    key={i}
-                    className="topic-btn"
-                    onClick={() => {
-                      setTopicInput(t);
-                      send({ command: "start_round", topic: t });
-                    }}
-                  >
-                    {t}
+          {/* EEG Calibration */}
+          {phase === "calibrate" && (
+            <div className="eeg-cal">
+              <h2>EEG Calibration</h2>
+              <p>Perform these actions in Gmail while we record your brain patterns:</p>
+              <div className="cal-actions">
+                {["interested", "disinterested", "reading", "scanning", "idle"].map(a => (
+                  <button key={a} className="btn btn-cal" onClick={() => send({ command: "cal_action", action: a })}>
+                    Record: {a}
                   </button>
                 ))}
               </div>
-            </div>
-          )}
-
-          {phase === "generating" && (
-            <div className="generating">
-              <h2>Agents are thinking...</h2>
-              <div className="gen-agents">
-                {agents.map((a) => (
-                  <div
-                    key={a.id}
-                    className="gen-agent"
-                    style={{ borderColor: a.color }}
-                  >
-                    <span className="gen-emoji">{a.emoji}</span>
-                    <span className="gen-name">{a.name}</span>
-                  </div>
+              <div className="cal-stats">
+                {calState?.stats && Object.entries(calState.stats).map(([k, v]) => (
+                  <span key={k} className="cal-stat">{k}: {v as number}</span>
                 ))}
               </div>
-            </div>
-          )}
-
-          {phase === "reading" && readingResp && (
-            <div className="reading">
-              <div className="reading-head">
-                <span className="reading-label">READING</span>
-                <span
-                  className="reading-agent"
-                  style={{ color: readingResp.color }}
-                >
-                  {readingResp.emoji} {readingResp.name}
-                </span>
-                <span className="reading-count">
-                  {readingIdx + 1} of {readingTotal}
-                </span>
-              </div>
-              <div
-                className="reading-card"
-                style={{
-                  borderColor: readingResp.color,
-                  boxShadow: `0 0 30px ${readingResp.color}15`,
-                }}
-              >
-                {readingResp.text}
-              </div>
-              <div className="timer-track">
-                <div
-                  className="timer-fill"
-                  style={{
-                    width: `${readingProgress * 100}%`,
-                    background: readingResp.color,
-                    boxShadow: `0 0 8px ${readingResp.color}60`,
-                  }}
-                />
-              </div>
-              <div className="timer-row">
-                <span className="timer-text">
-                  {Math.ceil(readingRemaining)}s remaining
-                </span>
-                <button
-                  className="btn btn-s btn-sm"
-                  onClick={() => send({ command: "next_response" })}
-                >
-                  Skip &rarr;
-                </button>
-              </div>
-            </div>
-          )}
-
-          {phase === "scoring" && (
-            <div className="scoring">
-              <h2>Computing Neural Rewards...</h2>
-              <div className="scoring-anim" />
-            </div>
-          )}
-
-          {(phase === "results" || phase === "adapting") && (
-            <div className="results">
-              <h2>Round {round} Results</h2>
-              <div className="reward-bars">
-                {rewards.map((r) => {
-                  const agent = agents.find((a) => a.id === r.agent_id);
-                  const isW = r.agent_id === winner;
-                  return (
-                    <div
-                      key={r.agent_id}
-                      className={`reward-row${isW ? " winner" : ""}`}
-                    >
-                      <div className="rw-agent">
-                        <span className="rw-emoji">{agent?.emoji}</span>
-                        <span className="rw-name">{agent?.name}</span>
-                        {isW && (
-                          <span className="winner-badge">
-                            {"★"} WINNER
-                          </span>
-                        )}
-                      </div>
-                      <div className="rw-track">
-                        <div
-                          className="rw-fill"
-                          style={{
-                            width: `${r.total * 100}%`,
-                            background: agent?.color,
-                            boxShadow: isW
-                              ? `0 0 16px ${agent?.color}50`
-                              : "none",
-                          }}
-                        />
-                      </div>
-                      <span className="rw-score">
-                        {Math.round(r.total * 100)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {Object.keys(adaptations).length > 0 && (
-                <div className="adaptations">
-                  <h3>Neural Feedback &rarr; Agent Adaptation</h3>
-                  {Object.entries(adaptations).map(([aid, text]) => {
-                    const ag = agents.find((a) => a.id === aid);
-                    return (
-                      <div key={aid} className="adapt-row">
-                        <span
-                          className="adapt-agent"
-                          style={{ color: ag?.color }}
-                        >
-                          {ag?.emoji} {ag?.name}:
-                        </span>{" "}
-                        <span className="adapt-text">{text}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {round < maxRounds && (
-                <button
-                  className="btn btn-p"
-                  onClick={() => setPhase("ready")}
-                >
-                  Next Round &rarr;
-                </button>
-              )}
-              {round >= maxRounds && (
-                <button
-                  className="btn btn-p"
-                  onClick={() => setPhase("complete")}
-                >
-                  View Summary
-                </button>
-              )}
-            </div>
-          )}
-
-          {phase === "complete" && (
-            <div className="complete">
-              <h2>SESSION COMPLETE</h2>
-              <p>
-                Over {history.length} rounds, your brain guided agents toward
-                your neural preferences.
-              </p>
-              {history.length > 0 && (
-                <Chart
-                  history={history}
-                  agents={agents}
-                  stats={agentStats}
-                  full
-                />
-              )}
-              <button
-                className="btn btn-p"
-                style={{ marginTop: 24 }}
-                onClick={() => window.location.reload()}
-              >
-                New Session
+              <button className="btn btn-p" onClick={() => send({ command: "end_eeg_cal" })}>
+                Finish Calibration
               </button>
             </div>
           )}
+
+          {/* Live Mode */}
+          {phase === "live" && (
+            <div className="live-view">
+              {/* Gmail Status */}
+              <div className="gmail-status">
+                <div className="gs-view">
+                  <span className="gs-icon">{gmail?.view === "inbox" ? "\u{1F4E5}" : gmail?.view === "email" ? "\u{1F4E7}" : "\u{1F4DD}"}</span>
+                  <span className="gs-label">{gmail?.view?.toUpperCase() || "LOADING"}</span>
+                  {gmail && gmail.unread_count > 0 && <span className="gs-unread">{gmail.unread_count} unread</span>}
+                  <span className="gs-elements">{gmail?.element_count || 0} elements</span>
+                </div>
+              </div>
+
+              {/* Intent Ring */}
+              {intentRing && intentRing.progress > 0 && (
+                <div className="intent-ring-display">
+                  <svg viewBox="0 0 120 120" className="ir-svg">
+                    <circle cx="60" cy="60" r="50" className="ir-bg" />
+                    <circle cx="60" cy="60" r="50" className="ir-fg"
+                      strokeDasharray={`${2 * Math.PI * 50}`}
+                      strokeDashoffset={`${2 * Math.PI * 50 * (1 - intentRing.progress)}`} />
+                  </svg>
+                  <div className="ir-info">
+                    <span className="ir-intent">{intentRing.intent}</span>
+                    <span className="ir-target">{intentRing.element_label.slice(0, 50)}</span>
+                    <span className="ir-conf">{Math.round(intentRing.confidence * 100)}%</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Element Minimap */}
+              {gmail && gmail.elements.length > 0 && (
+                <div className="element-list">
+                  <h3 className="panel-title">Gmail Elements</h3>
+                  <div className="el-scroll">
+                    {gmail.elements.filter(e => e.type !== "other").slice(0, 15).map(e => (
+                      <div key={e.id} className={`el-row ${gaze?.element?.id === e.id ? "el-focused" : ""}`}>
+                        <span className={`el-type el-type-${e.type.split("_")[0]}`}>{e.type.replace("_", " ")}</span>
+                        <span className="el-label">{e.label.slice(0, 60)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Startup */}
+          {phase === "startup" && (
+            <div className="startup">
+              <div className="startup-icon">{"\u{1F9E0}"}</div>
+              <h2>AXIOM.GMAIL</h2>
+              <p>Initializing brain-computer interface...</p>
+            </div>
+          )}
         </div>
 
-        {history.length > 0 && phase !== "complete" && phase !== "idle" && (
-          <Chart history={history} agents={agents} stats={agentStats} />
-        )}
+        {/* Action Feed */}
+        <div className="action-panel">
+          <h3 className="panel-title">Action Feed</h3>
+          <div className="action-scroll">
+            {actions.slice(-15).reverse().map((a, i) => (
+              <div key={i} className={`action-entry ${a.action}`}>
+                <div className="ae-head">
+                  <span className="ae-action">{a.action}</span>
+                  <span className="ae-conf">{Math.round(a.confidence * 100)}%</span>
+                </div>
+                <div className="ae-target">{a.target?.slice(0, 50)}</div>
+                <div className="ae-reason">{a.reason?.slice(0, 80)}</div>
+                {a.result && <div className="ae-result">{a.result}</div>}
+              </div>
+            ))}
+            {actions.length === 0 && <p className="no-actions">No actions yet</p>}
+          </div>
+
+          <div className="brain-divider" />
+          <h3 className="panel-title">System Log</h3>
+          <div className="log-scroll">
+            {systemLog.slice(-10).reverse().map((msg, i) => (
+              <div key={i} className="log-entry">{msg}</div>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {error && <div className="error-toast">{error}</div>}
-    </div>
-  );
-}
-
-function Chart({
-  history,
-  agents,
-  stats,
-  full,
-}: {
-  history: RoundResult[];
-  agents: Agent[];
-  stats: Record<
-    string,
-    { wins: number; rounds: number; avg_reward: number }
-  >;
-  full?: boolean;
-}) {
-  if (!history.length) return null;
-  const w = full
-    ? Math.max(history.length * 120, 240)
-    : Math.max(history.length * 80, 160);
-  const h = full ? 150 : 70;
-  const px = 40;
-
-  return (
-    <div className={full ? "chart-box" : "mini-chart"}>
-      {full ? <h3>Neural Reward Over Time</h3> : <h4>Reward History</h4>}
-      <svg
-        viewBox={`0 0 ${w} ${h + 20}`}
-        className={full ? "chart-svg" : "mini-svg"}
-        style={{ width: "100%", height: full ? 180 : 80 }}
-      >
-        {agents.map((agent) => {
-          const pts = history.map((r, i) => ({
-            x:
-              px +
-              (i * (w - px * 2)) / Math.max(history.length - 1, 1),
-            y: h - (r.rewards[agent.id] ?? 0.5) * (h - 10) + 5,
-          }));
-          if (pts.length === 1) {
-            return (
-              <circle
-                key={agent.id}
-                cx={pts[0].x}
-                cy={pts[0].y}
-                r={full ? 5 : 3}
-                fill={agent.color}
-              />
-            );
-          }
-          const d = pts
-            .map((p, i) => `${i ? "L" : "M"} ${p.x} ${p.y}`)
-            .join(" ");
-          return (
-            <g key={agent.id}>
-              <path
-                d={d}
-                fill="none"
-                stroke={agent.color}
-                strokeWidth={full ? 2.5 : 1.5}
-                opacity={0.85}
-              />
-              {pts.map((p, i) => (
-                <circle
-                  key={i}
-                  cx={p.x}
-                  cy={p.y}
-                  r={full ? 4 : 3}
-                  fill={agent.color}
-                />
-              ))}
-            </g>
-          );
-        })}
-        {full &&
-          history.map((_, i) => (
-            <text
-              key={i}
-              x={
-                px +
-                (i * (w - px * 2)) / Math.max(history.length - 1, 1)
-              }
-              y={h + 16}
-              textAnchor="middle"
-              fill="#5a6894"
-              fontSize="11"
-            >
-              R{i + 1}
-            </text>
-          ))}
-      </svg>
-      {full && (
-        <div className="chart-legend">
-          {agents.map((a) => (
-            <span key={a.id} className="legend-item">
-              <span className="legend-dot" style={{ background: a.color }} />
-              {a.emoji} {a.name}
-              {stats[a.id] && (
-                <span className="legend-wins">
-                  ({stats[a.id].wins} wins)
-                </span>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
+      {/* ErrP Toast */}
+      {errp && <div className="errp-toast">{errp}</div>}
     </div>
   );
 }

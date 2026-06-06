@@ -1,10 +1,10 @@
-"""Gaze Tracker — webcam-based eye tracking using MediaPipe Face Mesh.
+"""Gaze Tracker — webcam-based eye tracking using MediaPipe Face Landmarker.
 
 Uses 478 face landmarks (including 10 iris landmarks) to estimate
 where the user is looking on screen.
 
 Pipeline:
-  1. MediaPipe Face Mesh → iris + eye landmarks
+  1. MediaPipe FaceLandmarker → iris + eye landmarks
   2. Extract gaze features (iris position, head pose)
   3. Map to screen coordinates via calibrated ridge regression
 
@@ -15,6 +15,8 @@ Sufficient for quadrant/region detection and UI element targeting.
 import cv2
 import numpy as np
 import mediapipe as mp
+from mediapipe.tasks.python import vision as mp_vision
+from mediapipe.tasks.python import BaseOptions
 from dataclasses import dataclass
 from sklearn.linear_model import Ridge
 import json
@@ -30,17 +32,18 @@ LEFT_EYE_OUTER = 33
 RIGHT_EYE_OUTER = 263
 FOREHEAD = 10
 
-# 3D model points for head pose estimation (relative proportions)
 MODEL_POINTS = np.array([
-    (0.0, 0.0, 0.0),          # Nose tip
-    (0.0, -63.6, -12.5),      # Chin
-    (-43.3, 32.7, -26.0),     # Left eye corner
-    (43.3, 32.7, -26.0),      # Right eye corner
-    (-28.9, -28.9, -24.1),    # Left mouth corner
-    (28.9, -28.9, -24.1),     # Right mouth corner
+    (0.0, 0.0, 0.0),
+    (0.0, -63.6, -12.5),
+    (-43.3, 32.7, -26.0),
+    (43.3, 32.7, -26.0),
+    (-28.9, -28.9, -24.1),
+    (28.9, -28.9, -24.1),
 ], dtype=np.float64)
 
 POSE_LANDMARKS = [1, 152, 33, 263, 61, 291]
+
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "data", "face_landmarker.task")
 
 
 @dataclass
@@ -66,23 +69,26 @@ class GazeTracker:
         self.screen_h = screen_h
         self.camera_id = camera_id
 
-        self._mp_face = mp.solutions.face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-
+        self._landmarker = None
         self._cap = None
         self._model_x = None
         self._model_y = None
         self._calibration_data = []
         self._calibrated = False
-
         self._frame_w = 640
         self._frame_h = 480
 
     def start(self):
+        opts = mp_vision.FaceLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=MODEL_PATH),
+            output_face_blendshapes=False,
+            num_faces=1,
+            min_face_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            running_mode=mp_vision.RunningMode.IMAGE,
+        )
+        self._landmarker = mp_vision.FaceLandmarker.create_from_options(opts)
+
         self._cap = cv2.VideoCapture(self.camera_id)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -93,9 +99,19 @@ class GazeTracker:
         if self._cap:
             self._cap.release()
             self._cap = None
+        if self._landmarker:
+            self._landmarker.close()
+            self._landmarker = None
+
+    def _detect_landmarks(self, frame_rgb: np.ndarray):
+        """Run face landmarker on an RGB frame. Returns landmark list or None."""
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+        result = self._landmarker.detect(mp_img)
+        if not result.face_landmarks:
+            return None
+        return result.face_landmarks[0]
 
     def _extract_features(self, landmarks) -> np.ndarray:
-        """Extract gaze features from face landmarks."""
         left_iris = np.mean([[landmarks[i].x, landmarks[i].y]
                              for i in LEFT_IRIS], axis=0)
         right_iris = np.mean([[landmarks[i].x, landmarks[i].y]
@@ -109,14 +125,12 @@ class GazeTracker:
         left_eye_w = np.linalg.norm(left_corner_outer - left_corner_inner)
         right_eye_w = np.linalg.norm(right_corner_outer - right_corner_inner)
 
-        # Iris position relative to eye corners (0=outer, 1=inner)
         left_rel_x = 0.0 if left_eye_w < 1e-6 else (left_iris[0] - left_corner_outer[0]) / left_eye_w
         left_rel_y = left_iris[1] - (left_corner_outer[1] + left_corner_inner[1]) / 2
 
         right_rel_x = 0.0 if right_eye_w < 1e-6 else (right_iris[0] - right_corner_inner[0]) / right_eye_w
         right_rel_y = right_iris[1] - (right_corner_inner[1] + right_corner_outer[1]) / 2
 
-        # Head pose
         image_points = np.array([
             [landmarks[i].x * self._frame_w, landmarks[i].y * self._frame_h]
             for i in POSE_LANDMARKS
@@ -148,7 +162,6 @@ class GazeTracker:
         ])
 
     def process_frame(self) -> GazeResult:
-        """Capture a frame and estimate gaze position."""
         if not self._cap or not self._cap.isOpened():
             return GazeResult()
 
@@ -157,12 +170,11 @@ class GazeTracker:
             return GazeResult()
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self._mp_face.process(frame_rgb)
+        landmarks = self._detect_landmarks(frame_rgb)
 
-        if not results.multi_face_landmarks:
+        if landmarks is None:
             return GazeResult(confidence=0.0)
 
-        landmarks = results.multi_face_landmarks[0].landmark
         features = self._extract_features(landmarks)
 
         left_iris = np.mean([[landmarks[i].x, landmarks[i].y]
@@ -194,10 +206,6 @@ class GazeTracker:
         return result
 
     def add_calibration_point(self, screen_x: float, screen_y: float) -> bool:
-        """Add a calibration point — call while user looks at (screen_x, screen_y).
-
-        Returns True when enough points are collected to calibrate.
-        """
         if not self._cap or not self._cap.isOpened():
             return False
 
@@ -207,9 +215,8 @@ class GazeTracker:
             if not ret:
                 continue
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = self._mp_face.process(frame_rgb)
-            if results.multi_face_landmarks:
-                landmarks = results.multi_face_landmarks[0].landmark
+            landmarks = self._detect_landmarks(frame_rgb)
+            if landmarks is not None:
                 features_list.append(self._extract_features(landmarks))
 
         if len(features_list) < 5:
@@ -221,7 +228,6 @@ class GazeTracker:
         return len(self._calibration_data) >= 5
 
     def calibrate(self) -> bool:
-        """Fit the gaze model from collected calibration points."""
         if len(self._calibration_data) < 5:
             return False
 
@@ -237,7 +243,6 @@ class GazeTracker:
         return True
 
     def save_calibration(self, path: str = "data/gaze_calibration.json"):
-        """Save calibration data for reuse across sessions."""
         if not self._calibrated:
             return
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -254,7 +259,6 @@ class GazeTracker:
             json.dump(data, f, indent=2)
 
     def load_calibration(self, path: str = "data/gaze_calibration.json") -> bool:
-        """Load saved calibration."""
         if not os.path.exists(path):
             return False
         with open(path) as f:
@@ -270,7 +274,6 @@ class GazeTracker:
         return True
 
     def _classify_region(self, x: float, y: float) -> str:
-        """Classify screen position into a named region."""
         col = "left" if x < self.screen_w / 3 else ("right" if x > 2 * self.screen_w / 3 else "center")
         row = "top" if y < self.screen_h / 3 else ("bottom" if y > 2 * self.screen_h / 3 else "middle")
 
@@ -282,7 +285,6 @@ class GazeTracker:
         return f"{row}-{col}"
 
     def get_calibration_targets(self, n: int = 9) -> list[tuple[float, float]]:
-        """Generate screen positions for calibration targets."""
         margin = 0.1
         if n == 5:
             return [
@@ -292,7 +294,6 @@ class GazeTracker:
                 (self.screen_w * margin, self.screen_h * (1 - margin)),
                 (self.screen_w * (1 - margin), self.screen_h * (1 - margin)),
             ]
-        # 9-point grid
         cols = [margin, 0.5, 1 - margin]
         rows = [margin, 0.5, 1 - margin]
         return [(self.screen_w * c, self.screen_h * r)
@@ -300,7 +301,6 @@ class GazeTracker:
 
     def process_synthetic(self, iris_x: float = 0.5, iris_y: float = 0.5,
                           head_yaw: float = 0.0, head_pitch: float = 0.0) -> GazeResult:
-        """For simulation — process synthetic gaze data without a camera."""
         features = np.array([
             iris_x, iris_y,
             iris_x, iris_y,

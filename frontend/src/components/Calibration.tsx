@@ -13,7 +13,7 @@ interface CalibrationData {
 export function Calibration({
   brainState,
   onComplete,
-  sendCommand,
+  sendCommand: _sendCommand,
 }: {
   brainState: BrainState | null;
   onComplete: (data: CalibrationData) => void;
