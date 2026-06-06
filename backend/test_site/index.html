@@ -2,1139 +2,269 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MUSE BCI Test Inbox</title>
+<title>Axiom Gaze Test</title>
+<script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  :root {
-    --bg-primary: #060614;
-    --bg-secondary: #0d0d24;
-    --bg-tertiary: #14142e;
-    --bg-hover: #1a1a3e;
-    --bg-active: #222250;
-    --border: #2a2a50;
-    --text-primary: #e0e0f0;
-    --text-secondary: #8888aa;
-    --text-muted: #555577;
-    --accent: #6c63ff;
-    --accent-hover: #8a82ff;
-    --accent-dim: #3a3580;
-    --star-on: #ffcc00;
-    --star-off: #555577;
-    --danger: #ff4466;
-    --danger-hover: #ff6688;
-    --success: #44ff88;
-    --success-dim: #1a6638;
-    --warn: #ffaa33;
-    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
-    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  }
-
+  * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 14px;
-    line-height: 1.5;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* ── BCI TEST BANNER ── */
-  .bci-banner {
-    background: linear-gradient(90deg, #1a0a30, #0a1a30, #1a0a30);
-    border-bottom: 2px solid var(--accent);
-    padding: 12px 24px;
-    display: flex;
-    align-items: center;
-    gap: 32px;
-    flex-wrap: wrap;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-  .bci-banner-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--accent);
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    white-space: nowrap;
-  }
-  .bci-banner-title .pulse {
-    width: 10px; height: 10px;
-    background: var(--success);
-    border-radius: 50%;
-    animation: pulse 2s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--success); }
-    50% { opacity: 0.4; box-shadow: 0 0 12px var(--success); }
-  }
-  .bci-stat {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .bci-stat-label {
-    font-size: 10px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-  .bci-stat-value {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--text-primary);
-  }
-  .bci-stat-value.accent { color: var(--accent); }
-  .bci-checklist {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-left: auto;
-  }
-  .bci-check-item {
-    font-size: 11px;
-    padding: 4px 10px;
-    border-radius: 4px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    transition: all 0.3s;
-  }
-  .bci-check-item.tested {
-    border-color: var(--success);
-    color: var(--success);
-    background: var(--success-dim);
-  }
-
-  /* ── TOP BAR ── */
-  .topbar {
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-    padding: 12px 24px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-  .logo {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--accent);
-    letter-spacing: 3px;
-    white-space: nowrap;
-  }
-  .search-container {
-    flex: 1;
-    max-width: 600px;
-    position: relative;
-  }
-  .search-input {
-    width: 100%;
-    height: 44px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0 16px 0 44px;
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .search-input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(108, 99, 255, 0.2);
-  }
-  .search-input::placeholder { color: var(--text-muted); }
-  .search-icon {
-    position: absolute;
-    left: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--text-muted);
-    font-size: 16px;
-    pointer-events: none;
-  }
-  .topbar-actions {
-    display: flex;
-    gap: 8px;
-    margin-left: auto;
-  }
-
-  /* ── LAYOUT ── */
-  .main-layout {
-    display: flex;
-    flex: 1;
+    background: #060614;
+    color: #c8d0e8;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    height: 100vh;
     overflow: hidden;
   }
 
-  /* ── SIDEBAR ── */
-  .sidebar {
-    width: 220px;
-    min-width: 220px;
-    background: var(--bg-secondary);
-    border-right: 1px solid var(--border);
-    padding: 16px 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+  /* ── Calibration Phase ── */
+  #calScreen {
+    position: fixed; inset: 0; z-index: 100;
+    background: #060614;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
   }
-  .compose-btn {
-    margin: 0 16px 16px;
-    height: 52px;
-    background: var(--accent);
-    border: none;
-    border-radius: 10px;
-    color: #fff;
-    font-family: var(--font-mono);
-    font-size: 15px;
-    font-weight: 700;
+  #calScreen.done { display: none; }
+  #calScreen h2 { font-size: 20px; letter-spacing: 3px; margin-bottom: 8px; }
+  #calScreen p { font-size: 13px; color: #5a6894; margin-bottom: 30px; text-align: center; max-width: 480px; line-height: 1.6; }
+
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    width: 90vw; height: 70vh;
+  }
+  .cal-point {
+    display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    transition: background 0.2s, transform 0.1s;
-    letter-spacing: 1px;
   }
-  .compose-btn:hover { background: var(--accent-hover); }
-  .compose-btn:active { transform: scale(0.97); }
-
-  .nav-item {
-    height: 48px;
-    padding: 0 24px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    font-size: 14px;
-    transition: all 0.15s;
-    border-left: 3px solid transparent;
-    user-select: none;
+  .cal-dot {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #1a1a3e; border: 2px solid #5a6894;
+    transition: all 0.2s; position: relative;
   }
-  .nav-item:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .nav-item.active {
-    background: var(--bg-active);
-    color: var(--accent);
-    border-left-color: var(--accent);
-    font-weight: 600;
-  }
-  .nav-icon { font-size: 18px; width: 24px; text-align: center; }
-  .nav-badge {
-    margin-left: auto;
-    background: var(--accent-dim);
-    color: var(--accent);
-    font-size: 11px;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: 10px;
+  .cal-dot:hover { border-color: #00d4ff; }
+  .cal-dot.clicked1 { background: #00d4ff40; border-color: #00d4ff; }
+  .cal-dot.clicked2 { background: #00d4ff80; border-color: #00d4ff; }
+  .cal-dot.clicked3 { background: #00d4ff; border-color: #fff; }
+  .cal-dot.clicked3::after {
+    content: '✓'; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #000; font-size: 14px; font-weight: bold;
   }
 
-  /* ── CONTENT ── */
-  .content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+  #calInfo {
+    margin-top: 20px; font-size: 12px; color: #5a6894;
   }
+  #startBtn {
+    margin-top: 16px; padding: 12px 36px;
+    background: #00ff88; color: #000; border: none; border-radius: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 700;
+    letter-spacing: 1px; cursor: pointer; display: none;
+  }
+  #startBtn:hover { box-shadow: 0 0 20px #00ff8840; }
 
-  /* ── TOOLBAR ── */
-  .toolbar {
-    height: 52px;
-    min-height: 52px;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 20px;
-    gap: 8px;
-  }
-  .toolbar-btn {
-    height: 40px;
-    min-width: 40px;
-    padding: 0 14px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    transition: all 0.15s;
-    white-space: nowrap;
-  }
-  .toolbar-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent);
-    color: var(--text-primary);
-  }
-  .toolbar-btn.danger:hover {
-    border-color: var(--danger);
-    color: var(--danger);
-  }
-  .toolbar-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
-  .toolbar-divider {
-    width: 1px;
-    height: 24px;
-    background: var(--border);
-    margin: 0 4px;
-  }
-  .toolbar-spacer { flex: 1; }
-  .toolbar-info {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
+  /* ── Test Phase ── */
+  #testScreen { display: none; height: 100vh; flex-direction: column; }
+  #testScreen.active { display: flex; }
 
-  /* ── EMAIL LIST ── */
-  .email-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 4px 0;
+  .header {
+    padding: 12px 24px; border-bottom: 1px solid #1a1a3e;
+    background: #0d0d24; display: flex; justify-content: space-between; align-items: center;
   }
-  .email-row {
-    height: 56px;
-    min-height: 56px;
-    display: flex;
-    align-items: center;
-    padding: 0 20px;
-    gap: 12px;
-    border-bottom: 1px solid rgba(42, 42, 80, 0.4);
-    cursor: pointer;
-    transition: all 0.15s;
-    user-select: none;
-  }
-  .email-row:hover { background: var(--bg-hover); }
-  .email-row.selected { background: var(--bg-active); }
-  .email-row.unread { font-weight: 600; }
-  .email-row.unread .email-sender { color: var(--text-primary); }
-  .email-row.unread .email-subject { color: var(--text-primary); }
-  .email-row.removing {
-    animation: slideOut 0.4s ease forwards;
-  }
-  @keyframes slideOut {
-    to { height: 0; min-height: 0; opacity: 0; padding: 0 20px; overflow: hidden; }
-  }
+  .header h1 { font-size: 15px; letter-spacing: 3px; }
+  .header h1 span { color: #00d4ff; font-weight: 400; }
+  .status { font-size: 11px; color: #5a6894; display: flex; align-items: center; gap: 10px; }
+  #coords { min-width: 100px; }
 
-  .email-checkbox {
-    width: 20px;
-    height: 20px;
-    min-width: 20px;
-    border: 2px solid var(--border);
-    border-radius: 4px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.15s;
-    font-size: 12px;
-    color: transparent;
-  }
-  .email-checkbox.checked {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-  }
-  .email-star {
-    font-size: 20px;
-    cursor: pointer;
-    color: var(--star-off);
-    transition: color 0.15s, transform 0.15s;
-    min-width: 24px;
-    text-align: center;
-  }
-  .email-star.starred { color: var(--star-on); }
-  .email-star:hover { transform: scale(1.2); }
+  .grid-container { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 840px; width: 100%; }
 
-  .email-sender {
-    width: 180px;
-    min-width: 180px;
-    color: var(--text-secondary);
-    font-size: 13px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .box {
+    aspect-ratio: 16/10; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; font-weight: 700; letter-spacing: 2px;
+    border: 2px solid transparent; transition: all 0.15s ease;
   }
-  .email-subject {
-    color: var(--text-secondary);
-    font-size: 13px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-  .email-subject .subject-text { color: var(--text-primary); }
-  .email-snippet {
-    color: var(--text-muted);
-    margin-left: 6px;
-  }
-  .email-time {
-    margin-left: auto;
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
-  }
+  .box:nth-child(1) { background: #1a1a3e; }
+  .box:nth-child(2) { background: #1e0a2e; }
+  .box:nth-child(3) { background: #0a1e2e; }
+  .box:nth-child(4) { background: #2e1a0a; }
+  .box:nth-child(5) { background: #0a2e1a; }
+  .box:nth-child(6) { background: #2e0a1a; }
 
-  /* ── PAGINATION ── */
-  .pagination {
-    height: 48px;
-    min-height: 48px;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
+  .box.gazed {
+    transform: scale(1.05);
+    box-shadow: 0 0 40px rgba(255,255,255,0.12);
   }
-  .page-btn {
-    height: 40px;
-    padding: 0 24px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .page-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent);
-    color: var(--text-primary);
-  }
-  .page-info {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
+  .box:nth-child(1).gazed { border-color: #6c63ff; box-shadow: 0 0 40px #6c63ff30; }
+  .box:nth-child(2).gazed { border-color: #a855f7; box-shadow: 0 0 40px #a855f730; }
+  .box:nth-child(3).gazed { border-color: #00d4ff; box-shadow: 0 0 40px #00d4ff30; }
+  .box:nth-child(4).gazed { border-color: #ffaa00; box-shadow: 0 0 40px #ffaa0030; }
+  .box:nth-child(5).gazed { border-color: #00ff88; box-shadow: 0 0 40px #00ff8830; }
+  .box:nth-child(6).gazed { border-color: #ff6b9d; box-shadow: 0 0 40px #ff6b9d30; }
 
-  /* ── SINGLE EMAIL VIEW ── */
-  .email-view {
-    flex: 1;
-    overflow-y: auto;
-    padding: 32px;
-    display: none;
+  .box .box-label { opacity: 0.6; transition: opacity 0.15s; }
+  .box.gazed .box-label { opacity: 1; }
+  .box .gaze-tag {
+    position: absolute; bottom: 8px; font-size: 9px;
+    letter-spacing: 2px; color: #fff; opacity: 0;
+    transition: opacity 0.15s;
   }
-  .email-view.active { display: block; }
-  .email-view-header {
-    margin-bottom: 24px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-  }
-  .email-view-subject {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 12px;
-  }
-  .email-view-meta {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-  .email-view-sender {
-    font-weight: 600;
-    color: var(--accent);
-  }
-  .email-view-date {
-    color: var(--text-muted);
-    font-size: 12px;
-  }
-  .email-view-body {
-    color: var(--text-secondary);
-    line-height: 1.8;
-    font-size: 14px;
-    max-width: 700px;
-  }
-  .email-view-body p { margin-bottom: 16px; }
-  .back-btn {
-    height: 40px;
-    padding: 0 16px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    cursor: pointer;
-    margin-bottom: 20px;
-    transition: all 0.15s;
-  }
-  .back-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent);
-    color: var(--text-primary);
-  }
+  .box.gazed .gaze-tag { opacity: 0.7; }
+  .box { position: relative; }
 
-  /* ── COMPOSE VIEW ── */
-  .compose-view {
-    flex: 1;
-    overflow-y: auto;
-    padding: 32px;
-    display: none;
+  .footer {
+    padding: 10px 24px; border-top: 1px solid #1a1a3e;
+    background: #0d0d24; display: flex; justify-content: space-between;
+    align-items: center; font-size: 12px; color: #5a6894;
   }
-  .compose-view.active { display: flex; flex-direction: column; gap: 16px; }
-  .compose-field {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  .footer button {
+    padding: 5px 14px; background: #1a1a3e; color: #c8d0e8;
+    border: none; border-radius: 4px; font-family: inherit;
+    font-size: 11px; cursor: pointer;
   }
-  .compose-label {
-    width: 60px;
-    min-width: 60px;
-    font-size: 13px;
-    color: var(--text-muted);
-    text-align: right;
-  }
-  .compose-input {
-    flex: 1;
-    height: 44px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0 16px;
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-  .compose-input:focus { border-color: var(--accent); }
-  .compose-textarea {
-    flex: 1;
-    min-height: 200px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 16px;
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 14px;
-    resize: vertical;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-  .compose-textarea:focus { border-color: var(--accent); }
-  .compose-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 8px;
-  }
-  .send-btn {
-    height: 48px;
-    padding: 0 32px;
-    background: var(--accent);
-    border: none;
-    border-radius: 8px;
-    color: #fff;
-    font-family: var(--font-mono);
-    font-size: 15px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: background 0.2s;
-    letter-spacing: 1px;
-  }
-  .send-btn:hover { background: var(--accent-hover); }
-  .discard-btn {
-    height: 48px;
-    padding: 0 24px;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-    font-size: 14px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .discard-btn:hover {
-    border-color: var(--danger);
-    color: var(--danger);
-  }
+  .footer button:hover { background: #2a2a4e; }
 
-  /* ── ACTION LOG ── */
-  .action-log {
-    height: 200px;
-    min-height: 200px;
-    background: var(--bg-secondary);
-    border-top: 2px solid var(--border);
-    display: flex;
-    flex-direction: column;
-  }
-  .action-log-header {
-    height: 36px;
-    min-height: 36px;
-    display: flex;
-    align-items: center;
-    padding: 0 20px;
-    gap: 12px;
-    background: var(--bg-tertiary);
-    border-bottom: 1px solid var(--border);
-  }
-  .action-log-title {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    color: var(--text-muted);
-  }
-  .action-log-count {
-    font-size: 11px;
-    color: var(--accent);
-    margin-left: auto;
-  }
-  .action-log-clear {
-    font-size: 11px;
-    color: var(--text-muted);
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 2px 10px;
-    cursor: pointer;
-    font-family: var(--font-mono);
-    transition: all 0.15s;
-  }
-  .action-log-clear:hover {
-    border-color: var(--danger);
-    color: var(--danger);
-  }
-  .action-log-entries {
-    flex: 1;
-    overflow-y: auto;
-    padding: 4px 0;
-    font-size: 12px;
-  }
-  .log-entry {
-    padding: 4px 20px;
-    display: flex;
-    gap: 16px;
-    border-bottom: 1px solid rgba(42, 42, 80, 0.2);
-    animation: fadeIn 0.3s ease;
-  }
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .log-time { color: var(--text-muted); min-width: 80px; }
-  .log-type {
-    min-width: 100px;
-    padding: 1px 8px;
-    border-radius: 3px;
-    text-align: center;
-    font-weight: 600;
-    font-size: 11px;
-  }
-  .log-type.click { background: rgba(108, 99, 255, 0.2); color: var(--accent); }
-  .log-type.toggle { background: rgba(255, 204, 0, 0.15); color: var(--star-on); }
-  .log-type.navigate { background: rgba(68, 255, 136, 0.15); color: var(--success); }
-  .log-type.input { background: rgba(255, 170, 51, 0.15); color: var(--warn); }
-  .log-type.delete { background: rgba(255, 68, 102, 0.15); color: var(--danger); }
-  .log-label { color: var(--text-primary); flex: 1; }
-  .log-action { color: var(--text-secondary); }
-
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
-  /* Focus ring for keyboard/BCI nav */
-  *:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
+  #webgazerVideoContainer { display: none !important; }
+  #webgazerVideoFeed { display: none !important; }
+  #webgazerFaceFeedbackBox { display: none !important; }
+  #webgazerFaceOverlay { display: none !important; }
+  #webgazerGazeDot {
+    background: #00d4ff !important; box-shadow: 0 0 10px #00d4ff80 !important;
+    width: 10px !important; height: 10px !important;
+    border: 2px solid #fff !important; opacity: 0.7 !important;
   }
 </style>
 </head>
 <body>
 
-<!-- ── BCI TEST BANNER ── -->
-<div class="bci-banner" role="banner" aria-label="BCI Test Mode Status">
-  <div class="bci-banner-title">
-    <span class="pulse"></span>
-    BCI Test Mode
-  </div>
-  <div class="bci-stat">
-    <span class="bci-stat-label">Total Clicks</span>
-    <span class="bci-stat-value accent" id="totalClicks">0</span>
-  </div>
-  <div class="bci-stat">
-    <span class="bci-stat-label">Last Element</span>
-    <span class="bci-stat-value" id="lastElement" style="font-size:13px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">--</span>
-  </div>
-  <div class="bci-checklist" id="bciChecklist" role="list" aria-label="Element types tested">
-    <span class="bci-check-item" data-type="checkbox" role="listitem">&#9744; Checkbox</span>
-    <span class="bci-check-item" data-type="star" role="listitem">&#9744; Star</span>
-    <span class="bci-check-item" data-type="email-row" role="listitem">&#9744; Email Row</span>
-    <span class="bci-check-item" data-type="nav" role="listitem">&#9744; Nav</span>
-    <span class="bci-check-item" data-type="search" role="listitem">&#9744; Search</span>
-    <span class="bci-check-item" data-type="compose" role="listitem">&#9744; Compose</span>
-    <span class="bci-check-item" data-type="toolbar" role="listitem">&#9744; Toolbar</span>
-    <span class="bci-check-item" data-type="pagination" role="listitem">&#9744; Pagination</span>
-    <span class="bci-check-item" data-type="send" role="listitem">&#9744; Send</span>
-    <span class="bci-check-item" data-type="input" role="listitem">&#9744; Input</span>
-  </div>
+<!-- ═══ CALIBRATION ═══ -->
+<div id="calScreen">
+  <h2>GAZE CALIBRATION</h2>
+  <p>Click each dot 3 times while <strong>staring directly at it</strong>. Each click trains the eye tracker. Do all 9 dots.</p>
+  <div class="cal-grid" id="calGrid"></div>
+  <div id="calInfo">0 / 9 points completed</div>
+  <button id="startBtn" onclick="finishCal()">START TRACKING</button>
 </div>
 
-<!-- ── TOP BAR ── -->
-<div class="topbar" role="toolbar" aria-label="Top bar">
-  <div class="logo">MUSE MAIL</div>
-  <div class="search-container">
-    <span class="search-icon">&#128269;</span>
-    <input
-      class="search-input"
-      type="search"
-      placeholder="Search emails..."
-      role="searchbox"
-      aria-label="Search emails"
-      tabindex="1"
-      id="searchInput"
-    >
-  </div>
-</div>
-
-<!-- ── MAIN LAYOUT ── -->
-<div class="main-layout">
-
-  <!-- SIDEBAR -->
-  <nav class="sidebar" role="navigation" aria-label="Email folders">
-    <button
-      class="compose-btn"
-      role="button"
-      aria-label="Compose new email"
-      tabindex="2"
-      onclick="handleCompose()"
-    >&#9999;&#65039; Compose</button>
-
-    <div class="nav-item active" role="menuitem" aria-label="Inbox folder - 3 unread" tabindex="3" data-view="inbox" onclick="handleNav(this, 'inbox')">
-      <span class="nav-icon">&#128229;</span> Inbox
-      <span class="nav-badge">3</span>
-    </div>
-    <div class="nav-item" role="menuitem" aria-label="Starred folder" tabindex="4" data-view="starred" onclick="handleNav(this, 'starred')">
-      <span class="nav-icon">&#11088;</span> Starred
-    </div>
-    <div class="nav-item" role="menuitem" aria-label="Sent folder" tabindex="5" data-view="sent" onclick="handleNav(this, 'sent')">
-      <span class="nav-icon">&#128228;</span> Sent
-    </div>
-    <div class="nav-item" role="menuitem" aria-label="Drafts folder" tabindex="6" data-view="drafts" onclick="handleNav(this, 'drafts')">
-      <span class="nav-icon">&#128221;</span> Drafts
-    </div>
-    <div class="nav-item" role="menuitem" aria-label="Trash folder" tabindex="7" data-view="trash" onclick="handleNav(this, 'trash')">
-      <span class="nav-icon">&#128465;&#65039;</span> Trash
-    </div>
-  </nav>
-
-  <!-- CONTENT -->
-  <div class="content">
-
-    <!-- TOOLBAR -->
-    <div class="toolbar" role="toolbar" aria-label="Email actions">
-      <button class="toolbar-btn" role="button" aria-label="Select all emails" tabindex="8" onclick="handleSelectAll()">
-        &#9744; Select All
-      </button>
-      <div class="toolbar-divider"></div>
-      <button class="toolbar-btn" role="button" aria-label="Archive selected emails" tabindex="9" id="archiveBtn" onclick="handleArchive()">
-        &#128230; Archive
-      </button>
-      <button class="toolbar-btn" role="button" aria-label="Reply to email" tabindex="10" id="replyBtn" onclick="handleReply()">
-        &#8617; Reply
-      </button>
-      <button class="toolbar-btn danger" role="button" aria-label="Delete selected emails" tabindex="11" id="deleteBtn" onclick="handleDelete()">
-        &#128465; Delete
-      </button>
-      <div class="toolbar-divider"></div>
-      <button class="toolbar-btn" role="button" aria-label="Mark as read" tabindex="12" onclick="handleMarkRead()">
-        &#128172; Mark Read
-      </button>
-      <span class="toolbar-spacer"></span>
-      <span class="toolbar-info" id="selectionInfo">0 selected</span>
-    </div>
-
-    <!-- INBOX VIEW -->
-    <div class="email-list" id="emailList" role="list" aria-label="Email messages">
-      <!-- Populated by JS -->
-    </div>
-
-    <!-- SINGLE EMAIL VIEW -->
-    <div class="email-view" id="emailView" role="article" aria-label="Email message view">
-      <button class="back-btn" role="button" aria-label="Back to inbox" tabindex="30" onclick="handleBack()">&#8592; Back to Inbox</button>
-      <div class="email-view-header">
-        <div class="email-view-subject" id="viewSubject"></div>
-        <div class="email-view-meta">
-          <span class="email-view-sender" id="viewSender"></span>
-          <span class="email-view-date" id="viewDate"></span>
-        </div>
-      </div>
-      <div class="email-view-body" id="viewBody"></div>
-    </div>
-
-    <!-- COMPOSE VIEW -->
-    <div class="compose-view" id="composeView" role="form" aria-label="Compose email">
-      <button class="back-btn" role="button" aria-label="Back to inbox" tabindex="30" onclick="handleBack()">&#8592; Back to Inbox</button>
-      <h2 style="font-size:18px; color:var(--text-primary); margin-bottom:8px;">New Message</h2>
-      <div class="compose-field">
-        <label class="compose-label" for="composeTo">To</label>
-        <input class="compose-input" id="composeTo" type="email" placeholder="recipient@example.com" role="textbox" aria-label="Recipient email address" tabindex="31" onfocus="logAction('input','To field','focused')">
-      </div>
-      <div class="compose-field">
-        <label class="compose-label" for="composeSubject">Subj</label>
-        <input class="compose-input" id="composeSubject" type="text" placeholder="Subject" role="textbox" aria-label="Email subject" tabindex="32" onfocus="logAction('input','Subject field','focused')">
-      </div>
-      <textarea class="compose-textarea" id="composeBody" placeholder="Write your message..." role="textbox" aria-label="Email body" tabindex="33" onfocus="logAction('input','Body field','focused')"></textarea>
-      <div class="compose-actions">
-        <button class="send-btn" role="button" aria-label="Send email" tabindex="34" onclick="handleSend()">&#9654; Send</button>
-        <button class="discard-btn" role="button" aria-label="Discard draft" tabindex="35" onclick="handleDiscard()">Discard</button>
-      </div>
-    </div>
-
-    <!-- PAGINATION -->
-    <div class="pagination" id="pagination" role="navigation" aria-label="Email pagination">
-      <button class="page-btn" role="button" aria-label="Go to newer emails" tabindex="40" onclick="handlePage('newer')">&#8592; Newer</button>
-      <span class="page-info">1 &ndash; 8 of 24</span>
-      <button class="page-btn" role="button" aria-label="Go to older emails" tabindex="41" onclick="handlePage('older')">Older &#8594;</button>
+<!-- ═══ TEST ═══ -->
+<div id="testScreen">
+  <div class="header">
+    <h1>AXIOM <span>gaze test</span></h1>
+    <div class="status">
+      <span id="coords">--</span>
+      <span id="lookingAt">--</span>
     </div>
   </div>
-</div>
-
-<!-- ── ACTION LOG ── -->
-<div class="action-log" role="log" aria-label="Action log" aria-live="polite">
-  <div class="action-log-header">
-    <span class="action-log-title">Action Log</span>
-    <span class="action-log-count" id="logCount">0 events</span>
-    <button class="action-log-clear" role="button" aria-label="Clear action log" tabindex="50" onclick="clearLog()">Clear</button>
+  <div class="grid-container">
+    <div class="grid">
+      <div class="box" data-id="1"><span class="box-label">BOX 1</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="2"><span class="box-label">BOX 2</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="3"><span class="box-label">BOX 3</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="4"><span class="box-label">BOX 4</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="5"><span class="box-label">BOX 5</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="6"><span class="box-label">BOX 6</span><span class="gaze-tag">LOOKING HERE</span></div>
+    </div>
   </div>
-  <div class="action-log-entries" id="logEntries"></div>
+  <div class="footer">
+    <span id="footerStatus">Tracking active</span>
+    <button onclick="location.reload()">Recalibrate</button>
+  </div>
 </div>
 
 <script>
-// ── DATA ──
-const emails = [
-  { id: 1, sender: "Dr. Sarah Chen", subject: "EEG Calibration Results", snippet: "The P300 latency is within normal range, but we need to adjust the...", time: "2:14 PM", unread: true, starred: false, body: "Hi team,\n\nThe P300 latency measurements from this morning's session are within normal range (avg 312ms). However, I noticed the SSVEP response at 15Hz is slightly attenuated compared to baseline.\n\nI recommend we adjust the stimulus frequency to 13Hz for the next session and re-run the calibration protocol.\n\nAlso, the new dry electrode cap arrived. Initial impedance readings look promising - under 20k ohms on most channels.\n\nBest,\nSarah" },
-  { id: 2, sender: "Neural Interface Lab", subject: "Weekly BCI Accuracy Report", snippet: "Overall classification accuracy improved to 94.2% this week...", time: "1:30 PM", unread: true, starred: true, body: "WEEKLY BCI PERFORMANCE REPORT\n\nClassification Accuracy: 94.2% (up from 91.8%)\nFalse Positive Rate: 2.1%\nAverage Latency: 287ms\nSession Duration: 4.2 hours avg\n\nKey Improvements:\n- New CSP filter bank reduced noise by 18%\n- Adaptive classifier retraining every 50 trials\n- Artifact rejection threshold optimized\n\nAction Items:\n- Schedule participant P007 for follow-up\n- Update firmware on amplifier unit 3" },
-  { id: 3, sender: "Alex Rivera", subject: "Eye tracking integration PR", snippet: "Ready for review - added gaze-contingent selection with dwell...", time: "12:45 PM", unread: true, starred: false, body: "Hey,\n\nThe PR for gaze-contingent selection is ready for review. Here's what's included:\n\n- Dwell time threshold: configurable (default 800ms)\n- Gaze smoothing: Kalman filter with adaptive noise model\n- Selection feedback: visual highlight + audio confirmation\n- Fallback: if gaze confidence < 0.7, prompt for EEG confirmation\n\nI also added unit tests for the coordinate mapping between screen space and the accessibility tree nodes.\n\nLet me know if you want to pair on the review." },
-  { id: 4, sender: "OpenBCI Forum", subject: "Re: Cyton board sampling rate issues", snippet: "Have you tried updating the firmware? The latest release fixes the...", time: "11:20 AM", unread: false, starred: false, body: "In response to your question about the sampling rate drops:\n\nThe latest firmware (v3.2.1) addresses the USB buffer overflow issue that was causing dropped samples above 125 SPS. After updating:\n\n1. Reset the board (hold reset button 5 seconds)\n2. Set sampling rate via serial command: ~6 (for 250 SPS)\n3. Verify with the impedance check utility\n\nIf you're still seeing issues, it might be a driver conflict. Try disabling the built-in Bluetooth radio during acquisition.\n\nHope this helps!" },
-  { id: 5, sender: "Maya Patel", subject: "SSVEP paradigm design doc", snippet: "Attached the updated stimulus protocol. Key changes: frequency...", time: "10:05 AM", unread: false, starred: true, body: "Hi all,\n\nAttached is the updated SSVEP stimulus protocol document. Key changes from v2:\n\n- Frequency bands: 8Hz, 10Hz, 12Hz, 15Hz (dropped 6Hz due to alpha interference)\n- Stimulus size: increased to 4 degrees visual angle\n- Duration: 3 seconds per trial with 2 second ISI\n- Added photosensitivity screening questionnaire\n\nThe pilot data shows ITR of 45 bits/min with 4 classes, which is competitive with recent literature.\n\nPlease review before Thursday's meeting." },
-  { id: 6, sender: "DevOps Bot", subject: "[Alert] GPU cluster utilization at 92%", snippet: "The training pipeline for the new decoder model is consuming...", time: "9:30 AM", unread: false, starred: false, body: "AUTOMATED ALERT\n\nGPU Cluster Status: WARNING\nUtilization: 92% (threshold: 85%)\n\nTop consumers:\n- EEGNet decoder training (job-4521): 4x A100, 68% util\n- Transfer learning pipeline (job-4519): 2x A100, 24% util\n\nEstimated completion:\n- job-4521: 6 hours remaining\n- job-4519: 2 hours remaining\n\nRecommendation: Defer non-critical training jobs until current batch completes.\n\nThis is an automated message from the cluster monitoring system." },
-  { id: 7, sender: "Prof. James Liu", subject: "Grant proposal feedback", snippet: "Excellent draft! A few suggestions on the methodology section...", time: "Yesterday", unread: false, starred: false, body: "Dear team,\n\nI've reviewed the NIH R01 grant proposal draft. Overall, excellent work. Here are my comments:\n\n1. Methodology (p.12): Strengthen the justification for using transfer learning vs. training from scratch. Cite the Lawhern et al. 2018 paper.\n\n2. Sample size (p.15): The power analysis assumes effect size d=0.8. Given the heterogeneity in BCI performance, I'd recommend d=0.6 with a larger N.\n\n3. Budget: The equipment line item seems low. Make sure to include replacement electrode costs (~$200/set, need ~50 sets/year).\n\nDeadline is in 3 weeks. Let's schedule a review meeting.\n\nBest,\nJames" },
-  { id: 8, sender: "BCI Competition", subject: "Registration confirmed for BCI Challenge 2026", snippet: "Your team 'NeuroFlow' has been registered. The training data...", time: "Yesterday", unread: false, starred: false, body: "Dear NeuroFlow Team,\n\nYour registration for the BCI Challenge 2026 has been confirmed.\n\nTeam Details:\n- Team Name: NeuroFlow\n- Category: Motor Imagery Classification\n- Members: 4\n\nImportant Dates:\n- Training data release: July 1, 2026\n- Submission deadline: September 15, 2026\n- Results announcement: October 1, 2026\n\nThe training dataset includes 64-channel EEG recordings from 20 participants performing 4-class motor imagery (left hand, right hand, feet, tongue).\n\nGood luck!" },
-];
+// ── Calibration ──
+const calDots = [];
+let completedPoints = 0;
 
-let selectedEmails = new Set();
-let currentView = 'inbox';
-let totalClicks = 0;
-let logCount = 0;
-let testedTypes = new Set();
-
-// ── RENDER EMAILS ──
-function renderEmails() {
-  const list = document.getElementById('emailList');
-  list.innerHTML = '';
-  emails.forEach((email, i) => {
-    const row = document.createElement('div');
-    row.className = `email-row${email.unread ? ' unread' : ''}${selectedEmails.has(email.id) ? ' selected' : ''}`;
-    row.setAttribute('role', 'listitem');
-    row.setAttribute('aria-label', `Email from ${email.sender}: ${email.subject}`);
-    row.setAttribute('tabindex', String(13 + i));
-    row.dataset.id = email.id;
-
-    row.innerHTML = `
-      <div class="email-checkbox${selectedEmails.has(email.id) ? ' checked' : ''}"
-           role="checkbox"
-           aria-label="Select email from ${email.sender}"
-           aria-checked="${selectedEmails.has(email.id)}"
-           tabindex="${13 + i}"
-           onclick="event.stopPropagation(); handleCheckbox(${email.id}, this)">
-        ${selectedEmails.has(email.id) ? '&#10003;' : ''}
-      </div>
-      <div class="email-star${email.starred ? ' starred' : ''}"
-           role="button"
-           aria-label="${email.starred ? 'Unstar' : 'Star'} email from ${email.sender}"
-           tabindex="${13 + i}"
-           onclick="event.stopPropagation(); handleStar(${email.id}, this)">
-        ${email.starred ? '&#9733;' : '&#9734;'}
-      </div>
-      <span class="email-sender">${email.sender}</span>
-      <span class="email-subject">
-        <span class="subject-text">${email.subject}</span>
-        <span class="email-snippet"> &mdash; ${email.snippet}</span>
-      </span>
-      <span class="email-time">${email.time}</span>
-    `;
-
-    row.addEventListener('click', () => handleEmailClick(email));
-    list.appendChild(row);
-  });
-  updateSelectionInfo();
-}
-
-// ── HANDLERS ──
-function handleCheckbox(id, el) {
-  if (selectedEmails.has(id)) {
-    selectedEmails.delete(id);
-  } else {
-    selectedEmails.add(id);
-  }
-  const email = emails.find(e => e.id === id);
-  logAction('click', `Checkbox: ${email.sender}`, selectedEmails.has(id) ? 'checked' : 'unchecked');
-  markTested('checkbox');
-  renderEmails();
-}
-
-function handleStar(id, el) {
-  const email = emails.find(e => e.id === id);
-  email.starred = !email.starred;
-  logAction('toggle', `Star: ${email.sender}`, email.starred ? 'starred' : 'unstarred');
-  markTested('star');
-  renderEmails();
-}
-
-function handleEmailClick(email) {
-  email.unread = false;
-  document.getElementById('emailList').style.display = 'none';
-  document.getElementById('pagination').style.display = 'none';
-  document.getElementById('emailView').classList.add('active');
-  document.getElementById('composeView').classList.remove('active');
-
-  document.getElementById('viewSubject').textContent = email.subject;
-  document.getElementById('viewSender').textContent = email.sender;
-  document.getElementById('viewDate').textContent = email.time;
-  document.getElementById('viewBody').innerHTML = email.body.split('\n').map(p => `<p>${p || '&nbsp;'}</p>`).join('');
-
-  logAction('click', `Email Row: ${email.sender}`, 'opened email');
-  markTested('email-row');
-}
-
-function handleBack() {
-  document.getElementById('emailList').style.display = '';
-  document.getElementById('pagination').style.display = '';
-  document.getElementById('emailView').classList.remove('active');
-  document.getElementById('composeView').classList.remove('active');
-  logAction('navigate', 'Back button', 'returned to inbox');
-  renderEmails();
-}
-
-function handleNav(el, view) {
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  el.classList.add('active');
-  currentView = view;
-
-  document.getElementById('emailList').style.display = '';
-  document.getElementById('pagination').style.display = '';
-  document.getElementById('emailView').classList.remove('active');
-  document.getElementById('composeView').classList.remove('active');
-
-  logAction('navigate', `Nav: ${view}`, `switched to ${view}`);
-  markTested('nav');
-}
-
-function handleCompose() {
-  document.getElementById('emailList').style.display = 'none';
-  document.getElementById('pagination').style.display = 'none';
-  document.getElementById('emailView').classList.remove('active');
-  document.getElementById('composeView').classList.add('active');
-
-  document.getElementById('composeTo').value = '';
-  document.getElementById('composeSubject').value = '';
-  document.getElementById('composeBody').value = '';
-
-  logAction('click', 'Compose button', 'opened compose');
-  markTested('compose');
-}
-
-function handleSelectAll() {
-  const allSelected = selectedEmails.size === emails.length;
-  if (allSelected) {
-    selectedEmails.clear();
-    logAction('click', 'Select All', 'deselected all');
-  } else {
-    emails.forEach(e => selectedEmails.add(e.id));
-    logAction('click', 'Select All', 'selected all');
-  }
-  markTested('toolbar');
-  renderEmails();
-}
-
-function handleArchive() {
-  if (selectedEmails.size === 0) {
-    logAction('click', 'Archive button', 'no emails selected');
-    markTested('toolbar');
-    return;
-  }
-  const count = selectedEmails.size;
-  removeSelectedEmails();
-  logAction('click', 'Archive button', `archived ${count} email(s)`);
-  markTested('toolbar');
-}
-
-function handleDelete() {
-  if (selectedEmails.size === 0) {
-    logAction('delete', 'Delete button', 'no emails selected');
-    markTested('toolbar');
-    return;
-  }
-  const count = selectedEmails.size;
-  removeSelectedEmails();
-  logAction('delete', 'Delete button', `deleted ${count} email(s)`);
-  markTested('toolbar');
-}
-
-function handleReply() {
-  logAction('click', 'Reply button', 'reply initiated');
-  markTested('toolbar');
-  handleCompose();
-  document.getElementById('composeTo').value = 'reply@example.com';
-  document.getElementById('composeSubject').value = 'Re: ...';
-}
-
-function handleMarkRead() {
-  const count = selectedEmails.size;
-  selectedEmails.forEach(id => {
-    const email = emails.find(e => e.id === id);
-    if (email) email.unread = false;
-  });
-  logAction('click', 'Mark Read', `marked ${count} as read`);
-  markTested('toolbar');
-  renderEmails();
-}
-
-function removeSelectedEmails() {
-  const rows = document.querySelectorAll('.email-row');
-  rows.forEach(row => {
-    const id = parseInt(row.dataset.id);
-    if (selectedEmails.has(id)) {
-      row.classList.add('removing');
-    }
-  });
-  setTimeout(() => {
-    for (let i = emails.length - 1; i >= 0; i--) {
-      if (selectedEmails.has(emails[i].id)) {
-        emails.splice(i, 1);
+function buildCalGrid() {
+  const grid = document.getElementById('calGrid');
+  for (let i = 0; i < 9; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cal-point';
+    const dot = document.createElement('div');
+    dot.className = 'cal-dot';
+    dot.dataset.clicks = '0';
+    dot.dataset.idx = i;
+    dot.addEventListener('click', function(e) {
+      e.stopPropagation();
+      let clicks = parseInt(this.dataset.clicks) + 1;
+      this.dataset.clicks = clicks;
+      if (clicks === 1) this.className = 'cal-dot clicked1';
+      if (clicks === 2) this.className = 'cal-dot clicked2';
+      if (clicks >= 3) {
+        this.className = 'cal-dot clicked3';
+        this.style.pointerEvents = 'none';
+        completedPoints++;
+        document.getElementById('calInfo').textContent =
+          completedPoints + ' / 9 points completed';
+        if (completedPoints >= 9) {
+          document.getElementById('startBtn').style.display = 'block';
+          document.getElementById('calInfo').textContent = 'All points done — click below to start';
+        }
       }
-    }
-    selectedEmails.clear();
-    renderEmails();
-  }, 400);
-}
-
-function handlePage(direction) {
-  logAction('click', `Pagination: ${direction}`, `navigated ${direction}`);
-  markTested('pagination');
-}
-
-function handleSend() {
-  const to = document.getElementById('composeTo').value;
-  const subj = document.getElementById('composeSubject').value;
-  logAction('click', 'Send button', `sent to ${to || '(empty)'}, subj: "${subj || '(empty)'}"`);
-  markTested('send');
-  handleBack();
-}
-
-function handleDiscard() {
-  logAction('click', 'Discard button', 'draft discarded');
-  handleBack();
-}
-
-function updateSelectionInfo() {
-  document.getElementById('selectionInfo').textContent = `${selectedEmails.size} selected`;
-}
-
-// ── SEARCH ──
-document.getElementById('searchInput').addEventListener('focus', () => {
-  logAction('input', 'Search bar', 'focused');
-  markTested('search');
-});
-document.getElementById('searchInput').addEventListener('input', (e) => {
-  const query = e.target.value.toLowerCase();
-  const rows = document.querySelectorAll('.email-row');
-  rows.forEach(row => {
-    const text = row.textContent.toLowerCase();
-    row.style.display = text.includes(query) || query === '' ? '' : 'none';
-  });
-});
-
-// ── LOGGING ──
-function logAction(type, label, action) {
-  totalClicks++;
-  logCount++;
-
-  document.getElementById('totalClicks').textContent = totalClicks;
-  document.getElementById('lastElement').textContent = label;
-  document.getElementById('logCount').textContent = `${logCount} events`;
-
-  const entries = document.getElementById('logEntries');
-  const entry = document.createElement('div');
-  entry.className = 'log-entry';
-
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const ms = String(now.getMilliseconds()).padStart(3, '0');
-
-  entry.innerHTML = `
-    <span class="log-time">${timeStr}.${ms}</span>
-    <span class="log-type ${type}">${type.toUpperCase()}</span>
-    <span class="log-label">${label}</span>
-    <span class="log-action">${action}</span>
-  `;
-
-  entries.insertBefore(entry, entries.firstChild);
-
-  // Keep only last 100 entries
-  while (entries.children.length > 100) {
-    entries.removeChild(entries.lastChild);
-  }
-}
-
-function clearLog() {
-  document.getElementById('logEntries').innerHTML = '';
-  logCount = 0;
-  document.getElementById('logCount').textContent = '0 events';
-  logAction('click', 'Clear Log', 'log cleared');
-}
-
-// ── BCI CHECKLIST ──
-function markTested(type) {
-  if (testedTypes.has(type)) return;
-  testedTypes.add(type);
-  const items = document.querySelectorAll('.bci-check-item');
-  items.forEach(item => {
-    if (item.dataset.type === type) {
-      item.classList.add('tested');
-      item.innerHTML = `&#9745; ${item.textContent.replace(/^[☐☑☒]\s*/, '').trim()}`;
-    }
-  });
-}
-
-// ── COMPOSE INPUT TRACKING ──
-['composeTo', 'composeSubject', 'composeBody'].forEach(id => {
-  const el = document.getElementById(id);
-  if (el) {
-    el.addEventListener('focus', () => {
-      markTested('input');
     });
+    cell.appendChild(dot);
+    grid.appendChild(cell);
   }
-});
+}
 
-// ── INIT ──
-renderEmails();
+function finishCal() {
+  document.getElementById('calScreen').classList.add('done');
+  document.getElementById('testScreen').classList.add('active');
+  // Show the gaze dot
+  const gazeDot = document.getElementById('webgazerGazeDot');
+  if (gazeDot) gazeDot.style.display = 'block';
+}
 
-// Welcome log
-logAction('navigate', 'System', 'BCI test page loaded');
+// ── WebGazer ──
+webgazer
+  .setRegression('ridge')
+  .saveDataAcrossSessions(false)
+  .setGazeListener(function(data, timestamp) {
+    if (!data) return;
+    const x = data.x, y = data.y;
+    if (isNaN(x) || isNaN(y)) return;
+
+    document.getElementById('coords').textContent =
+      Math.round(x) + ', ' + Math.round(y);
+
+    // Only do box highlighting when test screen is visible
+    if (!document.getElementById('testScreen').classList.contains('active')) return;
+
+    const boxes = document.querySelectorAll('.box');
+    let hit = null;
+    boxes.forEach(box => {
+      const r = box.getBoundingClientRect();
+      const pad = 30; // forgiving hit area
+      if (x >= r.left - pad && x <= r.right + pad &&
+          y >= r.top - pad && y <= r.bottom + pad) {
+        hit = box;
+        box.classList.add('gazed');
+      } else {
+        box.classList.remove('gazed');
+      }
+    });
+
+    document.getElementById('lookingAt').textContent =
+      hit ? 'Looking at: BOX ' + hit.dataset.id : '--';
+    document.getElementById('footerStatus').textContent =
+      hit ? 'Gaze on BOX ' + hit.dataset.id : 'Tracking active';
+  })
+  .begin()
+  .then(() => {
+    // Hide all video elements
+    webgazer.showVideoPreview(false);
+    try { webgazer.showFaceOverlay(false); } catch(e) {}
+    try { webgazer.showFaceFeedbackBox(false); } catch(e) {}
+    // Also force-hide via DOM
+    ['webgazerVideoContainer','webgazerVideoFeed','webgazerFaceFeedbackBox','webgazerFaceOverlay'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    // Hide gaze dot during calibration
+    const gd = document.getElementById('webgazerGazeDot');
+    if (gd) gd.style.display = 'none';
+  });
+
+buildCalGrid();
 </script>
 </body>
 </html>

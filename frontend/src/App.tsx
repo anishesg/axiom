@@ -62,7 +62,7 @@ interface ErrPState {
 }
 
 interface CalState {
-  type: string;
+  cal_type: string;
   targets?: { x: number; y: number }[];
   total?: number;
   success?: boolean;
@@ -230,7 +230,7 @@ export default function App() {
           }
           case "calibration":
             setCalState(d as CalState);
-            if (d.type === "gaze_done" || d.type === "eeg_done") {
+            if (d.cal_type === "gaze_done" || d.cal_type === "eeg_done") {
               setPhase("live");
             }
             break;

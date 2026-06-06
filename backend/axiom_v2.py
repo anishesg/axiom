@@ -479,8 +479,6 @@ class AxiomV2:
         await self._broadcast_system("Starting gaze tracker...")
         try:
             self.gaze.start()
-            if self.gaze.load_calibration("data/gaze_calibration.json"):
-                await self._broadcast_system("Loaded saved gaze calibration")
         except Exception as e:
             await self._broadcast_system(f"Gaze tracker error: {e} -- continuing without gaze")
 
@@ -502,8 +500,13 @@ class AxiomV2:
             except Exception as e:
                 await self._broadcast_system(f"LLM error: {e}")
 
-        self.phase = "live"
-        await self._broadcast_system("System ready -- live mode")
+        # Wait for a dashboard to connect, then start gaze calibration
+        await self._broadcast_system("Waiting for dashboard (open http://localhost:5173)...")
+        while not clients:
+            await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
+        await self._broadcast_system("Starting gaze calibration...")
+        await self.start_gaze_calibration()
 
     async def stop(self):
         self.eeg.stop()
@@ -598,6 +601,20 @@ class AxiomV2:
                     } if self.focused_element else None,
                     "confidence": self.gaze_result.confidence,
                 })
+
+                # Highlight the focused element on the actual page
+                commitment = 0.0
+                if self.focused_element and self.fixation.fixating:
+                    if HAS_NEURAL_PIPELINE:
+                        commitment = self.intent_acc._element_beliefs.get(
+                            self.focused_element.id, 0.0)
+                    else:
+                        commitment = self.intent_acc.get_probability(
+                            self.focused_element.id)
+                await self.controller.highlight_element(
+                    self.focused_element if self.fixation.fixating else None,
+                    commitment,
+                )
 
             await asyncio.sleep(1.0 / GAZE_HZ)
 
@@ -899,7 +916,7 @@ class AxiomV2:
         self.phase = "gaze_cal"
         targets = self.gaze.get_calibration_targets(9)
         await self._broadcast("calibration", {
-            "type": "gaze_start",
+            "cal_type": "gaze_start",
             "targets": [{"x": t[0], "y": t[1]} for t in targets],
             "total": len(targets),
         })
@@ -910,18 +927,18 @@ class AxiomV2:
             self.gaze.calibrate()
             self.gaze.save_calibration("data/gaze_calibration.json")
             self.phase = "live"
-            await self._broadcast("calibration", {"type": "gaze_done", "success": True})
+            await self._broadcast("calibration", {"cal_type": "gaze_done", "success": True})
         else:
-            await self._broadcast("calibration", {"type": "gaze_point_added"})
+            await self._broadcast("calibration", {"cal_type": "gaze_point_added"})
 
     async def start_eeg_calibration(self):
         self.phase = "calibrate"
-        await self._broadcast("calibration", {"type": "eeg_start"})
+        await self._broadcast("calibration", {"cal_type": "eeg_start"})
         await self._broadcast_system("EEG calibration started -- perform actions while we record")
 
     async def end_eeg_calibration(self):
         self.phase = "live"
-        await self._broadcast("calibration", {"type": "eeg_done", "success": True})
+        await self._broadcast("calibration", {"cal_type": "eeg_done", "success": True})
         await self._broadcast_system("EEG calibration complete")
 
     # ── WebSocket ────────────────────────────────────────────────
@@ -953,6 +970,16 @@ class AxiomV2:
             "action_log": self._action_log[-20:],
             "supported_actions": SUPPORTED_ACTIONS,
         }))
+        # If we're in gaze calibration, re-send the targets so late-joining dashboards see them
+        if self.phase == "gaze_cal":
+            targets = self.gaze.get_calibration_targets(9)
+            await ws.send(json.dumps({
+                "type": "calibration",
+                "timestamp": time.time(),
+                "cal_type": "gaze_start",
+                "targets": [{"x": t[0], "y": t[1]} for t in targets],
+                "total": len(targets),
+            }))
         try:
             async for msg in ws:
                 try:

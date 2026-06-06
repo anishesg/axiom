@@ -20,7 +20,7 @@ from playwright.async_api import async_playwright, BrowserContext, Page
 
 logger = logging.getLogger(__name__)
 
-USER_DATA_DIR = "/Users/anish/muse-brain/data/chrome_profile"
+USER_DATA_DIR = "/Users/anishkataria/axiom/data/chrome_profile"
 WINDOW_X = 0
 WINDOW_Y = 0
 VIEWPORT_WIDTH = 1400
@@ -530,6 +530,52 @@ class UniversalController:
             return text or ""
         except Exception:
             return ""
+
+    # ── Gaze highlight ────────────────────────────────────────────────────────
+
+    async def highlight_element(self, element: WebElement | None, commitment: float = 0.0):
+        """Inject a visual highlight on the page around the gazed element."""
+        page = await self._active_page()
+        if page is None:
+            return
+        try:
+            if element is None:
+                await page.evaluate("document.getElementById('_axiom_hl')?.remove()")
+                return
+            b = element.bbox
+            await page.evaluate("""([x, y, w, h, commit, role, name]) => {
+                let el = document.getElementById('_axiom_hl');
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = '_axiom_hl';
+                    el.style.cssText = 'position:fixed;pointer-events:none;z-index:999999;border-radius:6px;transition:all 0.15s ease;box-sizing:border-box;';
+                    document.body.appendChild(el);
+                    const lbl = document.createElement('div');
+                    lbl.id = '_axiom_lbl';
+                    lbl.style.cssText = 'position:fixed;pointer-events:none;z-index:999999;font:bold 11px monospace;padding:2px 8px;border-radius:3px;white-space:nowrap;transition:all 0.15s ease;';
+                    document.body.appendChild(lbl);
+                }
+                const lbl = document.getElementById('_axiom_lbl');
+                const pad = 4;
+                el.style.left = (x - pad) + 'px';
+                el.style.top = (y - pad) + 'px';
+                el.style.width = (w + pad * 2) + 'px';
+                el.style.height = (h + pad * 2) + 'px';
+                const alpha = 0.25 + commit * 0.6;
+                const glow = commit > 0.7 ? '0 0 20px rgba(0,255,136,0.5)' : commit > 0.4 ? '0 0 12px rgba(0,212,255,0.3)' : 'none';
+                const color = commit > 0.7 ? 'rgba(0,255,136,' : commit > 0.4 ? 'rgba(0,212,255,' : 'rgba(108,99,255,';
+                el.style.border = '2px solid ' + color + Math.min(1, alpha + 0.3) + ')';
+                el.style.background = color + (alpha * 0.15) + ')';
+                el.style.boxShadow = glow;
+                lbl.style.left = (x - pad) + 'px';
+                lbl.style.top = (y - pad - 20) + 'px';
+                lbl.style.background = color + '0.9)';
+                lbl.style.color = '#fff';
+                lbl.textContent = role.toUpperCase() + ' · ' + (name || '').slice(0, 50);
+            }""", [b["x"], b["y"], b["width"], b["height"], commitment,
+                   element.role, element.name])
+        except Exception:
+            pass
 
     # ── Gaze convenience ───────────────────────────────────────────────────────
 
