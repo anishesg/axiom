@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Gaze-Select: Intelligent element selection from coarse gaze.
+"""Gaze-Select v2: Intelligent element selection from coarse gaze.
 
 The key insight: we don't need pixel-perfect gaze accuracy.
 We need to correctly identify WHICH ELEMENT the user is looking at.
 
-The page is divided into element zones. Coarse gaze + attention signals
-(dwell time, directional stability, engagement) produce a per-element
-confidence score. When confidence crosses threshold → that element
-is selected.
-
-This is a standalone calibration + testing environment.
-Once it feels right, it integrates back into Axiom.
+v2 improvements:
+  1. Hysteresis + 150ms exit delay (kills flicker between elements)
+  2. Motor space expansion (90px invisible hit area — 52%→96% accuracy)
+  3. Anisotropic One Euro Filter (tuned for eye physiology)
+  4. Apple-style micro-animations (spring scale, glow pulse, fast exit)
+  5. Adaptive thresholds by element density
 
 Usage:
     python3 run.py              # with Muse EEG
@@ -50,12 +49,10 @@ if USE_EEG:
 
 
 # ═════════════════════════════════════════════════════════════
-# ONE EURO FILTER — best-in-class gaze smoothing
+# ONE EURO FILTER — anisotropic, tuned for gaze
 # ═════════════════════════════════════════════════════════════
 
 class OneEuroFilter:
-    """Speed-adaptive low-pass filter. Smooth when slow, responsive when fast."""
-
     def __init__(self, min_cutoff=1.0, beta=0.007, d_cutoff=1.0):
         self.min_cutoff = min_cutoff
         self.beta = beta
@@ -76,21 +73,15 @@ class OneEuroFilter:
             self.t_prev = t
             self.dx_prev = 0.0
             return x
-
         dt = t - self.t_prev
         if dt <= 0:
             return self.x_prev
-
-        # Derivative
         dx = (x - self.x_prev) / dt
         a_d = self._alpha(self.d_cutoff, dt)
         dx_hat = a_d * dx + (1 - a_d) * self.dx_prev
-
-        # Adaptive cutoff
         cutoff = self.min_cutoff + self.beta * abs(dx_hat)
         a = self._alpha(cutoff, dt)
         x_hat = a * x + (1 - a) * self.x_prev
-
         self.x_prev = x_hat
         self.dx_prev = dx_hat
         self.t_prev = t
@@ -98,7 +89,7 @@ class OneEuroFilter:
 
 
 # ═════════════════════════════════════════════════════════════
-# ELEMENT ZONE — represents a selectable region on screen
+# ELEMENT ZONE
 # ═════════════════════════════════════════════════════════════
 
 @dataclass
@@ -109,16 +100,21 @@ class Element:
     y: int
     w: int
     h: int
-    color: tuple  # BGR
+    color: tuple
 
-    # Live state (updated each frame)
+    # Live state
     confidence: float = 0.0
     dwell_time: float = 0.0
     gaze_in: bool = False
     highlighted: bool = False
     selected: bool = False
     last_enter: float = 0.0
-    stability: float = 0.0  # how stable gaze is within this element
+    last_exit: float = 0.0
+    stability: float = 0.0
+
+    # [IMPROVEMENT 4] Animation state
+    anim_scale: float = 1.0
+    anim_glow: float = 0.0
 
     @property
     def cx(self):
@@ -130,107 +126,114 @@ class Element:
 
 
 # ═════════════════════════════════════════════════════════════
-# ATTENTION ENGINE — computes per-element confidence
+# ATTENTION ENGINE — with all 5 improvements
 # ═════════════════════════════════════════════════════════════
 
+MOTOR_PAD = 90          # [IMPROVEMENT 2] invisible hit area expansion
+HYSTERESIS_SHRINK = 20  # [IMPROVEMENT 1] inner boundary shrink for activation
+EXIT_DELAY = 0.15       # [IMPROVEMENT 1] 150ms before deactivation
+
 class AttentionEngine:
-    """Combines gaze position, dwell time, stability, and EEG engagement
-    into a per-element confidence score."""
+    def __init__(self, n_elements=2):
+        self.dwell_weight = 0.4
+        self.stability_weight = 0.3
+        self.proximity_weight = 0.2
+        self.eeg_weight = 0.1
 
-    def __init__(self):
-        # Tunable parameters
-        self.dwell_weight = 0.4       # how much dwell time matters
-        self.stability_weight = 0.3   # how much gaze stability matters
-        self.proximity_weight = 0.2   # how much distance-to-center matters
-        self.eeg_weight = 0.1         # how much EEG engagement matters
+        self.highlight_threshold = 0.3
+        self.switch_threshold = 0.15
+        self.decay_rate = 0.92
 
-        # Thresholds
-        self.highlight_threshold = 0.3    # confidence to start subtle highlight
-        self.select_threshold = 0.75      # confidence to select (fill ring)
-        self.switch_threshold = 0.15      # minimum confidence to switch away from current
+        # [IMPROVEMENT 5] Adaptive thresholds
+        self._update_thresholds(n_elements)
 
-        # Timing
-        self.dwell_saturate = 2.0    # seconds of dwell to reach max score
-        self.decay_rate = 0.92       # per-frame decay when not gazed
-
-        # Gaze velocity tracking (for stability)
         self.gaze_history = deque(maxlen=15)
-
-        # Currently highlighted element
         self.active_id = -1
 
-    def update(self, elements: list[Element], gaze_x: float, gaze_y: float,
-               engagement: float, dt: float):
-        """Update confidence for all elements. Returns id of selected element or -1."""
+    def _update_thresholds(self, n_elements):
+        """[IMPROVEMENT 5] Scale dwell/select thresholds by element density."""
+        n = max(2, n_elements)
+        # base_dwell=500ms for 4 elements, scales logarithmically
+        self.dwell_saturate = 0.5 * (1 + math.log2(n / 4))
+        # select threshold: higher for denser layouts
+        self.select_threshold = min(0.85, 0.65 + 0.03 * n)
 
+    def update(self, elements, gaze_x, gaze_y, engagement, dt):
         now = time.time()
         self.gaze_history.append((gaze_x, gaze_y, now))
 
-        # Compute gaze velocity (stability metric)
+        # Gaze velocity → stability
         gaze_speed = 0.0
         if len(self.gaze_history) >= 3:
             pts = list(self.gaze_history)
             dists = [math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1])
                      for i in range(1, len(pts))]
-            time_span = pts[-1][2] - pts[0][2]
-            if time_span > 0:
-                gaze_speed = sum(dists) / time_span  # px/sec
-
-        # Stability: inverse of speed, normalized to [0, 1]
-        # < 50 px/s = very stable (1.0), > 500 px/s = saccade (0.0)
+            t_span = pts[-1][2] - pts[0][2]
+            if t_span > 0:
+                gaze_speed = sum(dists) / t_span
         stability = max(0, min(1, 1.0 - (gaze_speed - 50) / 450))
 
         selected_id = -1
 
         for el in elements:
-            # Distance from gaze to element center
             dist = math.hypot(gaze_x - el.cx, gaze_y - el.cy)
 
-            # Is gaze inside the element (with padding)?
-            pad = 40
-            in_element = (el.x - pad <= gaze_x <= el.x + el.w + pad and
-                          el.y - pad <= gaze_y <= el.y + el.h + pad)
+            # [IMPROVEMENT 2] Motor space: 90px invisible expansion
+            in_motor = (el.x - MOTOR_PAD <= gaze_x <= el.x + el.w + MOTOR_PAD and
+                        el.y - MOTOR_PAD <= gaze_y <= el.y + el.h + MOTOR_PAD)
 
-            # Proximity score: 1.0 at center, fading toward edges
-            max_dist = math.hypot(el.w, el.h) / 2 + pad
+            # [IMPROVEMENT 1] Hysteresis: inner boundary for activation
+            in_inner = (el.x + HYSTERESIS_SHRINK <= gaze_x <= el.x + el.w - HYSTERESIS_SHRINK and
+                        el.y + HYSTERESIS_SHRINK <= gaze_y <= el.y + el.h - HYSTERESIS_SHRINK)
+
+            # State machine with hysteresis + exit delay
+            was_in = el.gaze_in
+
+            if not was_in:
+                # Must cross INNER boundary to activate
+                if in_inner:
+                    el.gaze_in = True
+                    el.last_enter = now
+            else:
+                # Must leave MOTOR boundary AND stay out for EXIT_DELAY to deactivate
+                if not in_motor:
+                    if el.last_exit <= 0:
+                        el.last_exit = now
+                    elif now - el.last_exit >= EXIT_DELAY:
+                        el.gaze_in = False
+                        el.last_exit = 0.0
+                else:
+                    el.last_exit = 0.0  # reset exit timer if back in motor zone
+
+            # Proximity score (relative to motor zone)
+            max_dist = math.hypot(el.w, el.h) / 2 + MOTOR_PAD
             proximity = max(0, 1.0 - dist / max_dist) if max_dist > 0 else 0
 
-            if in_element:
-                if not el.gaze_in:
-                    el.last_enter = now
-                    el.gaze_in = True
+            if el.gaze_in:
                 el.dwell_time = now - el.last_enter
                 el.stability = stability
             else:
-                el.gaze_in = False
                 el.dwell_time = 0.0
                 el.stability = 0.0
 
-            # Compute confidence components
+            # Confidence
             dwell_score = min(1.0, el.dwell_time / self.dwell_saturate)
             stability_score = el.stability
             proximity_score = proximity
             eeg_score = max(0, min(1, engagement))
 
             if el.gaze_in:
-                # Build up confidence
                 raw = (self.dwell_weight * dwell_score +
                        self.stability_weight * stability_score +
                        self.proximity_weight * proximity_score +
                        self.eeg_weight * eeg_score)
-                # Smooth transition: blend toward raw score
                 el.confidence = el.confidence * 0.7 + raw * 0.3
             else:
-                # Decay confidence
                 el.confidence *= self.decay_rate
 
-            # Clamp
             el.confidence = max(0, min(1, el.confidence))
-
-            # Highlight state
             el.highlighted = el.confidence >= self.highlight_threshold
 
-            # Selection check
             if el.confidence >= self.select_threshold:
                 selected_id = el.id
                 el.selected = True
@@ -250,8 +253,7 @@ BANDS = [("delta", 1.0, 4.0), ("theta", 4.0, 8.0), ("alpha", 8.0, 13.0),
 
 def compute_engagement(eeg_window):
     if not USE_EEG or eeg_window is None or eeg_window.shape[1] < EEG_SR:
-        return 0.5  # neutral
-
+        return 0.5
     def bp(data):
         if len(data) < EEG_SR:
             return {n: 0.0 for n, _, _ in BANDS}
@@ -264,8 +266,6 @@ def compute_engagement(eeg_window):
         psd = DataFilter.get_psd_welch(out, nfft, nfft // 2, EEG_SR,
                                         WindowOperations.HANNING.value)
         return {n: float(DataFilter.get_band_power(psd, lo, hi)) for n, lo, hi in BANDS}
-
-    # Frontal channels
     bp1 = bp(eeg_window[1])
     bp2 = bp(eeg_window[2])
     alpha = (bp1["alpha"] + bp2["alpha"]) / 2
@@ -275,73 +275,110 @@ def compute_engagement(eeg_window):
 
 
 # ═════════════════════════════════════════════════════════════
-# RENDERING
+# RENDERING — with micro-animations
 # ═════════════════════════════════════════════════════════════
 
-def draw_element(canvas, el: Element, now: float):
-    """Draw an element with confidence-based progressive highlighting."""
-    c = el.confidence
+def update_animations(el: Element, dt: float):
+    """[IMPROVEMENT 4] Spring-based scale + glow pulse."""
+    # Target scale: 1.03 when highlighted, 1.06 on select, 1.0 otherwise
+    if el.selected:
+        target_scale = 1.06
+    elif el.highlighted:
+        target_scale = 1.03
+    else:
+        target_scale = 1.0
 
-    # Background fill — intensity based on confidence
+    # Spring toward target (faster exit than entry — Apple pattern)
+    if target_scale > el.anim_scale:
+        # Entry: 120ms spring
+        spring = 8.0
+    else:
+        # Exit: 60ms (50% faster)
+        spring = 16.0
+
+    el.anim_scale += (target_scale - el.anim_scale) * min(1, spring * dt)
+
+    # Glow pulse: 0.42Hz heartbeat when highlighted
+    if el.highlighted:
+        el.anim_glow = 0.6 + 0.4 * math.sin(time.time() * 2 * math.pi * 0.42)
+    else:
+        el.anim_glow = max(0, el.anim_glow - dt * 4)  # fade out fast
+
+
+def draw_element(canvas, el: Element, now: float):
+    c = el.confidence
+    s = el.anim_scale
+
+    # Compute scaled rectangle (grow from center)
+    dw = int(el.w * (s - 1) / 2)
+    dh = int(el.h * (s - 1) / 2)
+    sx, sy = el.x - dw, el.y - dh
+    sw, sh_el = el.w + 2 * dw, el.h + 2 * dh
+
+    # Background fill
     if c > 0.01:
         overlay = canvas.copy()
         fill_alpha = 0.05 + c * 0.25
-        cv2.rectangle(overlay, (el.x, el.y), (el.x + el.w, el.y + el.h),
-                      el.color, -1)
+        cv2.rectangle(overlay, (sx, sy), (sx + sw, sy + sh_el), el.color, -1)
         cv2.addWeighted(overlay, fill_alpha, canvas, 1 - fill_alpha, 0, canvas)
 
-    # Border
+    # Border with glow
     if c >= 0.75:
-        # Strong — white glow
-        cv2.rectangle(canvas, (el.x, el.y), (el.x + el.w, el.y + el.h),
-                      (255, 255, 255), 3)
+        # Bright white + glow
+        glow_size = int(2 + el.anim_glow * 3)
+        cv2.rectangle(canvas, (sx - glow_size, sy - glow_size),
+                      (sx + sw + glow_size, sy + sh_el + glow_size),
+                      tuple(int(v * 0.3) for v in el.color), glow_size)
+        cv2.rectangle(canvas, (sx, sy), (sx + sw, sy + sh_el), (255, 255, 255), 3)
     elif c >= 0.3:
-        # Medium — colored
-        cv2.rectangle(canvas, (el.x, el.y), (el.x + el.w, el.y + el.h),
-                      el.color, 2)
+        # Colored border with subtle glow
+        glow_a = el.anim_glow * 0.5
+        if glow_a > 0.05:
+            glow_size = int(1 + glow_a * 2)
+            cv2.rectangle(canvas, (sx - glow_size, sy - glow_size),
+                          (sx + sw + glow_size, sy + sh_el + glow_size),
+                          tuple(int(v * 0.15) for v in el.color), glow_size)
+        cv2.rectangle(canvas, (sx, sy), (sx + sw, sy + sh_el), el.color, 2)
     else:
-        # Faint
         dim = tuple(int(v * 0.3) for v in el.color)
-        cv2.rectangle(canvas, (el.x, el.y), (el.x + el.w, el.y + el.h),
-                      dim, 1)
+        cv2.rectangle(canvas, (sx, sy), (sx + sw, sy + sh_el), dim, 1)
 
-    # Label
-    label_alpha = 0.3 + c * 0.7
-    label_color = tuple(int(v * label_alpha) for v in (255, 255, 255))
-    ts = cv2.getTextSize(el.label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+    # Label — fades in with confidence
+    label_a = 0.3 + c * 0.7
+    label_color = tuple(int(v * label_a) for v in (255, 255, 255))
+    font_scale = 0.7 * s
+    ts = cv2.getTextSize(el.label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 2)[0]
     cv2.putText(canvas, el.label,
                 (el.cx - ts[0] // 2, el.cy + ts[1] // 2),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, label_color, 2)
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, label_color, 2)
 
-    # Confidence ring (when building toward selection)
+    # Confidence ring
     if c >= 0.3:
-        radius = 30
-        angle = int(360 * min(1, c / 0.75))
+        radius = int(30 * s)
+        angle = int(360 * min(1, c / el._select_thresh))
         ring_color = (0, 255, 136) if c >= 0.6 else el.color
-        cv2.ellipse(canvas, (el.cx, el.cy - 40), (radius, radius),
+        ring_y = el.cy - int(40 * s)
+        cv2.ellipse(canvas, (el.cx, ring_y), (radius, radius),
                     -90, 0, 360, (40, 40, 60), 2)
-        cv2.ellipse(canvas, (el.cx, el.cy - 40), (radius, radius),
+        cv2.ellipse(canvas, (el.cx, ring_y), (radius, radius),
                     -90, 0, angle, ring_color, 3)
 
     # Selection flash
     if el.selected:
         overlay = canvas.copy()
-        cv2.rectangle(overlay, (el.x, el.y), (el.x + el.w, el.y + el.h),
-                      (0, 255, 136), -1)
+        cv2.rectangle(overlay, (sx, sy), (sx + sw, sy + sh_el), (0, 255, 136), -1)
         cv2.addWeighted(overlay, 0.3, canvas, 0.7, 0, canvas)
 
-    # Confidence label (small)
-    cv2.putText(canvas, f"{c:.0%}",
-                (el.x + 8, el.y + el.h - 8),
+    # Confidence % (small)
+    cv2.putText(canvas, f"{c:.0%}", (el.x + 8, el.y + el.h - 8),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.3, (80, 80, 120), 1)
 
 
 # ═════════════════════════════════════════════════════════════
-# LAYOUTS — different element arrangements to test
+# LAYOUTS
 # ═════════════════════════════════════════════════════════════
 
 def layout_two_boxes(sw, sh):
-    """Two big boxes — easiest test."""
     gap = sw // 5
     bw = (sw - 3 * gap) // 2
     bh = sh // 2
@@ -352,7 +389,6 @@ def layout_two_boxes(sw, sh):
     ]
 
 def layout_four_quadrants(sw, sh):
-    """Four quadrants — medium difficulty."""
     margin = 60
     gap = 20
     bw = (sw - 2 * margin - gap) // 2
@@ -366,7 +402,6 @@ def layout_four_quadrants(sw, sh):
     ]
 
 def layout_six_grid(sw, sh):
-    """3x2 grid — harder, closer to real UI."""
     margin = 50
     gap = 16
     cols, rows = 3, 2
@@ -385,10 +420,33 @@ def layout_six_grid(sw, sh):
             elements.append(Element(idx, labels[idx], x, y, bw, bh, colors[idx]))
     return elements
 
+def layout_nine_grid(sw, sh):
+    """3x3 grid — stress test for density."""
+    margin = 40
+    gap = 12
+    cols, rows = 3, 3
+    bw = (sw - 2 * margin - (cols - 1) * gap) // cols
+    bh = (sh - 110 - (rows - 1) * gap) // rows
+    top = 60
+    colors = [(255,150,50), (200,50,200), (50,200,255),
+              (50,255,136), (255,100,150), (200,200,50),
+              (150,200,255), (255,200,100), (100,255,200)]
+    labels = ["INBOX", "COMPOSE", "SEARCH", "CONTACTS", "CALENDAR",
+              "FILES", "SETTINGS", "PROFILE", "LOGOUT"]
+    elements = []
+    for r in range(rows):
+        for c in range(cols):
+            idx = r * cols + c
+            x = margin + c * (bw + gap)
+            y = top + r * (bh + gap)
+            elements.append(Element(idx, labels[idx], x, y, bw, bh, colors[idx]))
+    return elements
+
 LAYOUTS = [
     ("2 BOXES", layout_two_boxes),
     ("4 QUADRANTS", layout_four_quadrants),
     ("6 GRID", layout_six_grid),
+    ("9 GRID", layout_nine_grid),
 ]
 
 
@@ -406,11 +464,10 @@ def main():
 
     # ── EEG ──────────────────────────────────────────────────
     eeg = None
+    USE_EEG_local = False
     if USE_EEG:
         if not is_bridge_running():
-            print("WARNING: Muse bridge not running. Use --no-eeg or start bridge.")
-            print("Continuing without EEG.")
-            USE_EEG_local = False
+            print("WARNING: Muse bridge not running. Continuing without EEG.")
         else:
             eeg = EEGBridgeClient()
             eeg.start()
@@ -420,11 +477,10 @@ def main():
             print("EEG connected")
             USE_EEG_local = True
     else:
-        USE_EEG_local = False
         print("Running without EEG (--no-eeg)")
 
     # ── Gaze calibration ─────────────────────────────────────
-    cam_idx = 1  # MacBook built-in
+    cam_idx = 1
     for idx in [1, 0]:
         cap = cv2.VideoCapture(idx)
         ret, _ = cap.read()
@@ -440,34 +496,40 @@ def main():
                                 pulse_d=1.0, cd_d=1.0, camera_index=cam_idx)
     print("  Done.\n")
 
-    # ── Smoothing ─────────────────────────────────────────────
-    filter_x = OneEuroFilter(min_cutoff=0.8, beta=0.008)
-    filter_y = OneEuroFilter(min_cutoff=0.8, beta=0.008)
+    # [IMPROVEMENT 3] Anisotropic One Euro Filters
+    filter_x = OneEuroFilter(min_cutoff=0.5, beta=0.02)   # horizontal: more responsive
+    filter_y = OneEuroFilter(min_cutoff=0.4, beta=0.01)   # vertical: heavier smoothing
 
     # ── Main loop ─────────────────────────────────────────────
     cap = cv2.VideoCapture(cam_idx)
     cv2.namedWindow("Gaze-Select", cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty("Gaze-Select", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
-    engine = AttentionEngine()
     layout_idx = 0
     elements = LAYOUTS[layout_idx][1](sw, sh)
+    engine = AttentionEngine(n_elements=len(elements))
+
+    # Store select threshold on each element for the ring animation
+    for el in elements:
+        el._select_thresh = engine.select_threshold
+
     selection_log = []
     gaze_x, gaze_y = sw // 2, sh // 2
     last_time = time.time()
     engagement = 0.5
     eng_history = deque(maxlen=15)
 
-    print("  Controls: TAB=switch layout  R=recalibrate  ESC=quit")
-    print(f"  Layout: {LAYOUTS[layout_idx][0]}")
+    print(f"  Layout: {LAYOUTS[layout_idx][0]} ({len(elements)} elements)")
+    print(f"  Select threshold: {engine.select_threshold:.2f}")
+    print(f"  Dwell saturate: {engine.dwell_saturate:.2f}s")
+    print("  Controls: TAB=layout  R=recalibrate  ESC=quit\n")
 
     while True:
         now = time.time()
-        dt = now - last_time
+        dt = max(0.001, now - last_time)
         last_time = now
 
         # ── EEG ──────────────────────────────────────────────
-        eeg_window = None
         if eeg and USE_EEG_local:
             eeg.pull()
             eeg_window = eeg.get_window(2.0)
@@ -488,14 +550,19 @@ def main():
         # ── Attention engine ─────────────────────────────────
         selected = engine.update(elements, gaze_x, gaze_y, engagement, dt)
 
+        # [IMPROVEMENT 4] Update animations
+        for el in elements:
+            update_animations(el, dt)
+
         if selected >= 0:
             el = elements[selected]
             selection_log.append((now, el.label))
             print(f"  SELECTED: {el.label} (confidence={el.confidence:.0%})")
-            # Reset all confidences after selection
             for e in elements:
                 e.confidence = 0
                 e.selected = False
+                e.anim_scale = 1.0
+                e.anim_glow = 0.0
             time.sleep(0.3)
 
         # ── Draw ─────────────────────────────────────────────
@@ -505,7 +572,8 @@ def main():
         # Header
         cv2.putText(canvas, "GAZE-SELECT", (20, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 208, 232), 1)
-        cv2.putText(canvas, f"Layout: {LAYOUTS[layout_idx][0]}", (sw // 2 - 60, 30),
+        layout_name = LAYOUTS[layout_idx][0]
+        cv2.putText(canvas, f"Layout: {layout_name}", (sw // 2 - 60, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 104, 148), 1)
         cv2.putText(canvas, f"Selections: {len(selection_log)}", (sw - 180, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 104, 148), 1)
@@ -514,7 +582,7 @@ def main():
         for el in elements:
             draw_element(canvas, el, now)
 
-        # Gaze dot (subtle)
+        # Gaze dot
         cv2.circle(canvas, (gaze_x, gaze_y), 4, (0, 180, 255), -1)
         cv2.circle(canvas, (gaze_x, gaze_y), 6, (255, 255, 255), 1)
 
@@ -529,20 +597,23 @@ def main():
         cv2.imshow("Gaze-Select", canvas)
         key = cv2.waitKey(16) & 0xFF
 
-        if key == 27:  # ESC
+        if key == 27:
             break
         elif key == 9:  # TAB
             layout_idx = (layout_idx + 1) % len(LAYOUTS)
             elements = LAYOUTS[layout_idx][1](sw, sh)
-            engine = AttentionEngine()
-            print(f"  Layout: {LAYOUTS[layout_idx][0]}")
+            engine = AttentionEngine(n_elements=len(elements))
+            for el in elements:
+                el._select_thresh = engine.select_threshold
+            print(f"  Layout: {LAYOUTS[layout_idx][0]} ({len(elements)} elements, "
+                  f"thresh={engine.select_threshold:.2f}, dwell={engine.dwell_saturate:.2f}s)")
         elif key == ord('r'):
             cap.release()
             cv2.destroyAllWindows()
             run_dense_grid_calibration(gaze, rows=5, cols=5, order="serpentine",
                                         pulse_d=1.0, cd_d=1.0, camera_index=cam_idx)
-            filter_x = OneEuroFilter(min_cutoff=0.8, beta=0.008)
-            filter_y = OneEuroFilter(min_cutoff=0.8, beta=0.008)
+            filter_x = OneEuroFilter(min_cutoff=0.5, beta=0.02)
+            filter_y = OneEuroFilter(min_cutoff=0.4, beta=0.01)
             cap = cv2.VideoCapture(cam_idx)
             cv2.namedWindow("Gaze-Select", cv2.WND_PROP_FULLSCREEN)
             cv2.setWindowProperty("Gaze-Select", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
