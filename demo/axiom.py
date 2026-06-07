@@ -398,9 +398,8 @@ class LinUCBBandit:
 # ATTENTION ENGINE (proven from gaze-select)
 # ═════════════════════════════════════════════════════════════
 
-MOTOR_PAD = 80
-HYSTERESIS_PAD = 15
-EXIT_DELAY = 0.15
+MOTOR_PAD = 90
+EXIT_DELAY = 0.4  # sticky — don't unhighlight for 400ms
 
 class ElementState:
     def __init__(self, id, x, y, w, h):
@@ -412,6 +411,7 @@ class ElementState:
         self.confidence = 0.0
         self.dwell_time = 0.0
         self.gaze_in = False
+        self.highlighted = False
         self.last_enter = 0.0
         self.last_exit = 0.0
         self.stability = 0.0
@@ -423,20 +423,44 @@ class ElementState:
 
 
 class AttentionEngine:
+    """Sticky, element-based attention. No cursor — just highlights.
+
+    Philosophy: the user is GUIDING us, not hiding. If gaze is near
+    an element, commit to highlighting it. Only switch when gaze is
+    clearly on a DIFFERENT element. Looking away = rejection signal.
+    """
+
     def __init__(self, n_elements):
         self.dwell_weight = 0.30
-        self.stability_weight = 0.25
+        self.stability_weight = 0.20
         self.proximity_weight = 0.15
-        self.eeg_weight = 0.30  # EEG weight increased for RL integration
+        self.eeg_weight = 0.35
         self.dwell_saturate = 1.8 * (1 + max(0, math.log2(max(1, n_elements) / 4)))
         self.select_threshold = 0.75
-        self.decay_rate = 0.91
+        self.decay_rate = 0.94  # slower decay — stickier
         self.gaze_history = deque(maxlen=20)
+        self.pinned_id = None  # currently highlighted element
+        self.pinned_since = 0.0
+        self.empty_gaze_since = 0.0  # when gaze last left all elements
+
+    def _find_nearest(self, elements, gaze_x, gaze_y):
+        """Find the element closest to gaze, within motor range."""
+        best_id = None
+        best_dist = float('inf')
+        for el in elements.values():
+            if (el.x - MOTOR_PAD <= gaze_x <= el.x + el.w + MOTOR_PAD and
+                    el.y - MOTOR_PAD <= gaze_y <= el.y + el.h + MOTOR_PAD):
+                dist = math.hypot(gaze_x - el.cx, gaze_y - el.cy)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_id = el.id
+        return best_id
 
     def update(self, elements, gaze_x, gaze_y, engagement):
         now = time.time()
         self.gaze_history.append((gaze_x, gaze_y, now))
 
+        # Gaze velocity → stability
         gaze_speed = 0.0
         if len(self.gaze_history) >= 3:
             pts = list(self.gaze_history)
@@ -447,49 +471,66 @@ class AttentionEngine:
                 gaze_speed = sum(dists) / span
         stability = max(0, min(1, 1.0 - (gaze_speed - 40) / 400))
 
+        # Find which element gaze is nearest to
+        nearest_id = self._find_nearest(elements, gaze_x, gaze_y)
+
+        # Sticky pin logic:
+        # - If gaze is on a NEW element, switch pin immediately (user is guiding)
+        # - If gaze is on the SAME element, keep building confidence
+        # - If gaze is on NO element, keep current pin for EXIT_DELAY, then unpin
+        if nearest_id is not None:
+            self.empty_gaze_since = 0
+            if nearest_id != self.pinned_id:
+                # User moved to a different element — switch immediately
+                if self.pinned_id and self.pinned_id in elements:
+                    elements[self.pinned_id].gaze_in = False
+                    elements[self.pinned_id].dwell_time = 0
+                self.pinned_id = nearest_id
+                self.pinned_since = now
+                el = elements[nearest_id]
+                el.gaze_in = True
+                el.last_enter = now
+                el.dwell_time = 0
+                el.highlighted = True
+        else:
+            # Gaze is in empty space
+            if self.empty_gaze_since == 0:
+                self.empty_gaze_since = now
+            elif now - self.empty_gaze_since > EXIT_DELAY:
+                # Gaze has been away long enough — unpin
+                if self.pinned_id and self.pinned_id in elements:
+                    elements[self.pinned_id].gaze_in = False
+                    elements[self.pinned_id].dwell_time = 0
+                    elements[self.pinned_id].highlighted = False
+                self.pinned_id = None
+
+        # Update all elements
         selected_id = None
         for el in elements.values():
-            dist = math.hypot(gaze_x - el.cx, gaze_y - el.cy)
-            in_motor = (el.x - MOTOR_PAD <= gaze_x <= el.x + el.w + MOTOR_PAD and
-                        el.y - MOTOR_PAD <= gaze_y <= el.y + el.h + MOTOR_PAD)
-            in_inner = (el.x + HYSTERESIS_PAD <= gaze_x <= el.x + el.w - HYSTERESIS_PAD and
-                        el.y + HYSTERESIS_PAD <= gaze_y <= el.y + el.h - HYSTERESIS_PAD)
+            is_pinned = (el.id == self.pinned_id)
 
-            if el.gaze_in:
-                if in_motor:
-                    el.dwell_time = now - el.last_enter
-                    el.stability = stability
-                    el.last_exit = 0
-                else:
-                    if el.last_exit == 0:
-                        el.last_exit = now
-                    if now - el.last_exit > EXIT_DELAY:
-                        el.gaze_in = False
-                        el.dwell_time = 0
-                        el.stability = 0
-                        el.last_exit = 0
-            else:
-                if in_inner:
-                    el.last_enter = now
-                    el.gaze_in = True
-                    el.last_exit = 0
-                    el.dwell_time = 0
+            if is_pinned:
+                el.gaze_in = True
+                el.dwell_time = now - el.last_enter
+                el.stability = stability
+                el.highlighted = True
 
-            max_dist = math.hypot(el.w, el.h) / 2 + MOTOR_PAD
-            proximity = max(0, 1.0 - dist / max_dist) if max_dist > 0 else 0
+                # Compute confidence
+                dist = math.hypot(gaze_x - el.cx, gaze_y - el.cy)
+                max_dist = math.hypot(el.w, el.h) / 2 + MOTOR_PAD
+                proximity = max(0, 1.0 - dist / max_dist) if max_dist > 0 else 0
 
-            dwell_score = min(1.0, el.dwell_time / self.dwell_saturate)
-            stab_score = el.stability if el.gaze_in else 0
-            prox_score = proximity
-            eeg_score = max(0, min(1, engagement))
+                dwell_score = min(1.0, el.dwell_time / self.dwell_saturate)
+                eeg_score = max(0, min(1, engagement))
 
-            if el.gaze_in:
                 raw = (self.dwell_weight * dwell_score +
-                       self.stability_weight * stab_score +
-                       self.proximity_weight * prox_score +
+                       self.stability_weight * stability +
+                       self.proximity_weight * proximity +
                        self.eeg_weight * eeg_score)
-                el.confidence = el.confidence * 0.7 + raw * 0.3
+                el.confidence = el.confidence * 0.65 + raw * 0.35
             else:
+                el.gaze_in = False
+                el.highlighted = False
                 el.confidence *= self.decay_rate
 
             el.confidence = max(0, min(1, el.confidence))
@@ -503,6 +544,9 @@ class AttentionEngine:
             el.confidence = 0
             el.gaze_in = False
             el.dwell_time = 0
+            el.highlighted = False
+        self.pinned_id = None
+        self.empty_gaze_since = 0
 
 
 # ═════════════════════════════════════════════════════════════
@@ -832,10 +876,14 @@ async def broadcast_loop():
     while shared_state["ready"]:
         if ws_clients:
             elements_data = {}
+            engine = shared_state["engine"]
+            pinned = engine.pinned_id if engine else None
             for eid, el in shared_state["elements"].items():
                 elements_data[eid] = {
                     "confidence": round(el.confidence, 3),
                     "gaze_in": el.gaze_in,
+                    "highlighted": el.highlighted,
+                    "pinned": eid == pinned,
                     "dwell_time": round(el.dwell_time, 2),
                 }
 

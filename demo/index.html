@@ -160,13 +160,7 @@
     font-size: 11px; color: var(--dim);
   }
 
-  /* ── Gaze dot ── */
-  .gaze-dot {
-    position: fixed; width: 10px; height: 10px; border-radius: 50%;
-    background: rgba(0, 180, 255, 0.5); border: 2px solid rgba(255,255,255,0.4);
-    transform: translate(-50%, -50%); pointer-events: none; z-index: 1000;
-    transition: left 0.05s ease, top 0.05s ease;
-  }
+  /* No gaze dot — elements highlight directly, Apple Vision Pro style */
 
   .flash { position: fixed; inset: 0; background: rgba(0,255,136,0.06); z-index: 999; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
   .flash.active { opacity: 1; }
@@ -197,7 +191,7 @@
 <body>
 
 <div class="flash" id="flash"></div>
-<div class="gaze-dot" id="gazeDot"></div>
+<!-- No gaze dot — highlights guide the user, not a jittery cursor -->
 
 <!-- Header -->
 <div class="header">
@@ -418,10 +412,6 @@ function connect() {
     const d = JSON.parse(e.data);
     if (d.type !== 'state') return;
 
-    // Gaze dot
-    document.getElementById('gazeDot').style.left = d.gaze_x + 'px';
-    document.getElementById('gazeDot').style.top = d.gaze_y + 'px';
-
     // Header stats
     const eng = d.engagement;
     document.getElementById('engLabel').textContent = `${(eng*100).toFixed(0)}%`;
@@ -441,20 +431,26 @@ function connect() {
       document.getElementById('playerPersona').textContent = d.brain_persona;
     }
 
-    // Element highlighting
+    // Element highlighting — sticky, element-based, no cursor
     if (currentScreen === 'browse') {
       document.querySelectorAll('.card').forEach(card => {
         const el = d.elements[card.id];
         card.classList.remove('gaze-hover', 'gaze-focus', 'gaze-locked', 'gaze-selected');
         if (!el) return;
         const c = el.confidence;
-        if (c >= 0.65) card.classList.add('gaze-locked');
-        else if (c >= 0.35) card.classList.add('gaze-focus');
-        else if (c >= 0.15) card.classList.add('gaze-hover');
 
+        // Pinned = immediately highlighted (sticky)
+        // Confidence determines the intensity level
+        if (el.pinned) {
+          if (c >= 0.60) card.classList.add('gaze-locked');
+          else if (c >= 0.25) card.classList.add('gaze-focus');
+          else card.classList.add('gaze-hover');
+        }
+
+        // Ring shows selection progress
         const ring = card.querySelector('.ring-fg');
         const pct = card.querySelector('.ring-pct');
-        if (ring && c >= 0.15) {
+        if (ring && el.pinned && c >= 0.2) {
           ring.setAttribute('stroke-dashoffset', CIRC * (1 - Math.min(1, c / 0.75)));
           pct.textContent = Math.round(c * 100) + '%';
         } else if (ring) {
@@ -468,12 +464,15 @@ function connect() {
         btn.classList.remove('gaze-hover', 'gaze-focus', 'gaze-locked');
         if (!el) return;
         const c = el.confidence;
-        if (c >= 0.65) btn.classList.add('gaze-locked');
-        else if (c >= 0.35) btn.classList.add('gaze-focus');
-        else if (c >= 0.15) btn.classList.add('gaze-hover');
+
+        if (el.pinned) {
+          if (c >= 0.60) btn.classList.add('gaze-locked');
+          else if (c >= 0.25) btn.classList.add('gaze-focus');
+          else btn.classList.add('gaze-hover');
+        }
 
         const ring = btn.querySelector('.ctrl-ring circle');
-        if (ring && c >= 0.15) {
+        if (ring && el.pinned && c >= 0.2) {
           ring.setAttribute('stroke-dashoffset', CTRL_CIRC * (1 - Math.min(1, c / 0.75)));
         } else if (ring) {
           ring.setAttribute('stroke-dashoffset', CTRL_CIRC);
