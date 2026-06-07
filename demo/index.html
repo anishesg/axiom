@@ -76,20 +76,26 @@
   /* ── Player ── */
   #playerScreen { display:none; height:calc(100vh - 52px); flex-direction:column; background:#000; }
   #playerScreen.active { display:flex; }
-  .player-video { flex:1; position:relative; }
+  .player-video { flex:1; position:relative; display:flex; align-items:center; justify-content:center; }
   .player-video iframe { width:100%; height:100%; border:none; }
-  .player-overlay { position:absolute; inset:0; background:linear-gradient(transparent 60%,rgba(0,0,0,0.7));
-                    display:flex; flex-direction:column; justify-content:flex-end; padding:40px; }
-  .player-title { font-size:28px; font-weight:800; margin-bottom:8px; }
-  .player-meta { font-size:13px; color:var(--dim); }
-  .player-controls { padding:14px 40px; background:var(--surface); display:flex;
-                     align-items:center; gap:16px; border-top:1px solid var(--border); }
-  .ctrl-btn { padding:10px 24px; border-radius:8px; border:none; font-family:'Inter';
-              font-size:13px; font-weight:600; cursor:pointer; transition:all 0.2s; }
+  .player-overlay { position:absolute; inset:0; background:linear-gradient(transparent 40%,rgba(0,0,0,0.85));
+                    display:flex; flex-direction:column; justify-content:flex-end; padding:60px; }
+  .player-title { font-size:36px; font-weight:800; margin-bottom:10px; }
+  .player-meta { font-size:14px; color:var(--dim); margin-bottom:16px; }
+  .player-desc { font-size:13px; color:#7a7a9a; max-width:500px; line-height:1.6; }
+  .player-controls { padding:0 40px; background:var(--surface);
+                     display:flex; align-items:stretch; gap:0;
+                     border-top:1px solid var(--border); min-height:90px; }
+  .ctrl-btn { padding:0 50px; border-radius:0; border:none; font-family:'Inter';
+              font-size:16px; font-weight:700; cursor:pointer; transition:all 0.25s;
+              display:flex; align-items:center; justify-content:center;
+              letter-spacing:1px; min-width:200px; border-right:1px solid var(--border); }
+  .ctrl-btn:last-of-type { border-right:none; }
   .ctrl-btn.primary { background:var(--accent); color:white; }
-  .ctrl-btn.secondary { background:var(--border); color:var(--text); }
-  .ctrl-btn.pinned { transform:scale(1.05); box-shadow:0 0 15px rgba(255,255,255,0.1); }
-  .ctrl-btn.locked { transform:scale(1.08); box-shadow:0 0 20px rgba(229,9,20,0.3); }
+  .ctrl-btn.primary:hover { background:#ff1a25; }
+  .ctrl-btn.secondary { background:var(--surface); color:var(--text); }
+  .ctrl-btn.pinned { background:rgba(255,255,255,0.08); box-shadow:inset 0 0 30px rgba(255,255,255,0.05); }
+  .ctrl-btn.locked { background:rgba(229,9,20,0.2); box-shadow:inset 0 0 40px rgba(229,9,20,0.15); }
 
   /* ── Bottom ── */
   .bottom { position:fixed; bottom:0; left:0; right:0; z-index:20; }
@@ -170,9 +176,12 @@
 <div id="playerScreen">
   <div class="player-video" id="playerVideo"></div>
   <div class="player-controls" id="playerControls">
-    <div class="ctrl-btn primary" id="btnPlay" data-action="play">▶ Play</div>
-    <div class="ctrl-btn secondary" id="btnBack" data-action="back">← Back</div>
-    <div style="margin-left:auto;font-size:11px;color:var(--dim)" id="playerEng">--</div>
+    <div class="ctrl-btn primary" id="btnPlay" data-action="play">▶  PLAY</div>
+    <div class="ctrl-btn secondary" id="btnBack" data-action="back">←  BACK</div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:14px;padding:0 20px">
+      <span style="font-size:11px;color:var(--dim)" id="playerEng">--</span>
+      <span style="font-size:11px;color:var(--dim)" id="playerStatus">Look at a button. Focus to select.</span>
+    </div>
   </div>
 </div>
 
@@ -185,20 +194,28 @@
 const CIRC = 2 * Math.PI * 28;
 const MOVIES = [
   { id:"m1", title:"Neural Drift",    year:"2026", rating:"TV-MA", color:"#1a0a2e",
+    desc:"A neuroscientist discovers she can read minds through a consumer EEG — but the signals are coming from somewhere else.",
     video:"https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&controls=0" },
   { id:"m2", title:"The Last Signal", year:"2025", rating:"PG-13", color:"#0a1a2e",
+    desc:"When Earth's last radio telescope picks up a pattern in deep space noise, one intern realizes it matches human brainwaves.",
     video:"https://www.youtube.com/embed/jNQXAC9IVRw?autoplay=1&mute=1&controls=0" },
   { id:"m3", title:"Cortex",          year:"2026", rating:"R",     color:"#2e1a0a",
+    desc:"In a world where memories can be extracted and traded, a black-market dealer discovers a memory that could end everything.",
     video:"https://www.youtube.com/embed/LXb3EKWsInQ?autoplay=1&mute=1&controls=0" },
   { id:"m4", title:"Mind Gate",       year:"2024", rating:"TV-14", color:"#0a2e1a",
+    desc:"A brain-computer interface startup goes public — then their users start sharing dreams involuntarily.",
     video:"https://www.youtube.com/embed/ScMzIvxBSi4?autoplay=1&mute=1&controls=0" },
   { id:"m5", title:"Brainwave",       year:"2026", rating:"PG-13", color:"#2e0a1a",
+    desc:"An athlete banned from competition learns to control machines with her mind, entering the underground BCI racing circuit.",
     video:"https://www.youtube.com/embed/1La4QzGeaaQ?autoplay=1&mute=1&controls=0" },
   { id:"m6", title:"Synaptic",        year:"2025", rating:"TV-MA", color:"#1a2e0a",
+    desc:"Two strangers realize their neural implants have been secretly connected. Every thought is shared. Every secret exposed.",
     video:"https://www.youtube.com/embed/hHW1oY26kxQ?autoplay=1&mute=1&controls=0" },
   { id:"m7", title:"The Interface",   year:"2026", rating:"R",     color:"#0a0a2e",
+    desc:"A rogue AI teaches itself to speak directly to human neurons. The question is whether you can tell the difference.",
     video:"https://www.youtube.com/embed/ZRCdORJiUgU?autoplay=1&mute=1&controls=0" },
   { id:"m8", title:"Echo Protocol",   year:"2024", rating:"TV-14", color:"#2e2e0a",
+    desc:"When a classified military BCI program is leaked, every soldier with an implant becomes a potential weapon.",
     video:"https://www.youtube.com/embed/d1YBv2mWll0?autoplay=1&mute=1&controls=0" },
 ];
 
@@ -322,13 +339,20 @@ function showPlayer(movie) {
   currentMovie = movie; currentScreen = 'player'; isPlaying = false;
   document.getElementById('browseScreen').style.display = 'none';
   document.getElementById('playerScreen').classList.add('active');
+
+  const desc = movie.desc || 'A mind-bending experience awaits.';
   document.getElementById('playerVideo').innerHTML = `
-    <div class="player-overlay"><div class="player-title">${movie.title}</div>
-    <div class="player-meta">${movie.year} · ${movie.rating} · 2h 14m</div></div>`;
-  document.getElementById('playerVideo').style.background = `linear-gradient(135deg,${movie.color},#0a0a15)`;
-  document.getElementById('btnPlay').textContent = '▶ Play';
+    <div class="player-overlay">
+      <div class="player-title">${movie.title}</div>
+      <div class="player-meta">${movie.year} · ${movie.rating} · 2h 14m</div>
+      <div class="player-desc">${desc}</div>
+    </div>`;
+  document.getElementById('playerVideo').style.background =
+    `linear-gradient(135deg, ${movie.color}cc, ${movie.color}40, #0a0a15)`;
+  document.getElementById('btnPlay').textContent = '▶  PLAY';
   document.getElementById('npBar').textContent = `Selected: ${movie.title}`;
   document.getElementById('npBar').style.color = 'var(--text)';
+  document.getElementById('playerStatus').textContent = 'Look at PLAY or BACK. Focus to select.';
   setTimeout(registerElements, 300);
 }
 
@@ -337,14 +361,21 @@ function togglePlay() {
   if (!isPlaying) {
     isPlaying = true;
     pv.innerHTML = `<iframe src="${currentMovie.video}" allow="autoplay;encrypted-media" allowfullscreen></iframe>`;
-    document.getElementById('btnPlay').textContent = '⏸ Pause';
+    document.getElementById('btnPlay').textContent = '⏸  PAUSE';
     document.getElementById('npBar').textContent = `▶ Playing: ${currentMovie.title}`;
+    document.getElementById('playerStatus').textContent = 'Focus on PAUSE to stop.';
   } else {
     isPlaying = false;
-    pv.innerHTML = `<div class="player-overlay"><div class="player-title">${currentMovie.title}</div></div>`;
-    pv.style.background = `linear-gradient(135deg,${currentMovie.color},#0a0a15)`;
-    document.getElementById('btnPlay').textContent = '▶ Play';
+    pv.innerHTML = `
+      <div class="player-overlay">
+        <div class="player-title">${currentMovie.title}</div>
+        <div class="player-meta">${currentMovie.year} · ${currentMovie.rating} · 2h 14m</div>
+        <div class="player-desc">${currentMovie.desc || ''}</div>
+      </div>`;
+    pv.style.background = `linear-gradient(135deg,${currentMovie.color}cc,${currentMovie.color}40,#0a0a15)`;
+    document.getElementById('btnPlay').textContent = '▶  PLAY';
     document.getElementById('npBar').textContent = `Paused: ${currentMovie.title}`;
+    document.getElementById('playerStatus').textContent = 'Focus on PLAY to resume.';
   }
 }
 
