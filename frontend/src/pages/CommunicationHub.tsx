@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { SignalStrength } from '../components/ui/SignalStrength';
 import { ConfirmationModal } from '../components/ui/ConfirmationModal';
 import { useSessionStore } from '../stores/sessionStore';
@@ -176,6 +177,20 @@ export function CommunicationHub() {
 
         <div className="flex items-center gap-gutter">
           <SignalStrength level={signalStrength} maxLevel={4} />
+          <Link
+            to="/dashboard"
+            className="material-symbols-outlined text-primary p-2 hover:bg-surface-container rounded transition-colors"
+            title="Dashboard"
+          >
+            monitoring
+          </Link>
+          <Link
+            to="/train"
+            className="material-symbols-outlined text-primary p-2 hover:bg-surface-container rounded transition-colors"
+            title="Training Mode"
+          >
+            school
+          </Link>
           <button className="material-symbols-outlined text-primary p-2">
             volume_up
           </button>

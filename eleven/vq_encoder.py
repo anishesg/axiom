@@ -24,6 +24,18 @@ class VQConfig:
     commitment_cost: float = 0.25  # Weight for commitment loss (if training)
 
 
+@dataclass
+class RVQConfig:
+    """Configuration for Residual Vector Quantizer (NeuroRVQ-inspired)."""
+
+    n_levels: int = 3                          # Number of quantization levels
+    codebook_sizes: tuple = (32, 64, 128)      # Codebook size per level
+    feature_dim: int = 150                     # Feature dimension (multi-scale)
+    commitment_cost: float = 0.25              # VQ commitment cost
+    ema_decay: float = 0.99                    # EMA decay for online adaptation
+    use_ema: bool = True                       # Enable online codebook adaptation
+
+
 class VectorQuantizer:
     """
     Vector Quantizer using K-means style codebook.
@@ -180,6 +192,306 @@ class VectorQuantizer:
         }
 
 
+class ResidualVectorQuantizer:
+    """
+    Residual Vector Quantizer (RVQ) inspired by NeuroRVQ.
+
+    Uses multiple quantization levels where each level encodes the
+    residual error from the previous level. This achieves:
+    - Progressive refinement of encoding
+    - Better reconstruction accuracy
+    - Hierarchical pattern capture (coarse → fine)
+    """
+
+    def __init__(self, config: Optional[RVQConfig] = None):
+        self.config = config or RVQConfig()
+
+        # Validate config
+        assert len(self.config.codebook_sizes) == self.config.n_levels, \
+            "codebook_sizes must have n_levels entries"
+
+        # Create VQ level for each quantization stage
+        self.levels: list[VectorQuantizer] = []
+        for i, size in enumerate(self.config.codebook_sizes):
+            level_config = VQConfig(
+                codebook_size=size,
+                feature_dim=self.config.feature_dim,
+                commitment_cost=self.config.commitment_cost,
+            )
+            self.levels.append(VectorQuantizer(level_config))
+
+        # EMA statistics for online adaptation
+        if self.config.use_ema:
+            self._ema_cluster_size = [
+                np.zeros(size) for size in self.config.codebook_sizes
+            ]
+            self._ema_dw = [
+                np.zeros((size, self.config.feature_dim))
+                for size in self.config.codebook_sizes
+            ]
+
+        # Track reconstruction errors per level
+        self.reconstruction_errors: list[float] = []
+
+    def encode(self, features: np.ndarray) -> list[int]:
+        """
+        Encode feature vector through all RVQ levels.
+
+        Args:
+            features: Shape (feature_dim,) feature vector
+
+        Returns:
+            List of token indices, one per level
+        """
+        tokens = []
+        residual = features.copy()
+
+        for level in self.levels:
+            token = level.encode(residual)
+            tokens.append(token)
+
+            # Compute residual for next level
+            quantized = level.decode(token)
+            residual = residual - quantized
+
+        return tokens
+
+    def encode_batch(self, features: np.ndarray) -> np.ndarray:
+        """
+        Encode batch of feature vectors.
+
+        Args:
+            features: Shape (batch_size, feature_dim)
+
+        Returns:
+            Token indices of shape (batch_size, n_levels)
+        """
+        batch_size = features.shape[0]
+        all_tokens = np.zeros((batch_size, self.config.n_levels), dtype=int)
+        residuals = features.copy()
+
+        for level_idx, level in enumerate(self.levels):
+            tokens = level.encode_batch(residuals)
+            all_tokens[:, level_idx] = tokens
+
+            # Compute residuals for next level
+            quantized = np.array([level.decode(t) for t in tokens])
+            residuals = residuals - quantized
+
+        return all_tokens
+
+    def decode(self, tokens: list[int]) -> np.ndarray:
+        """
+        Decode tokens back to feature vector.
+
+        Args:
+            tokens: List of token indices, one per level
+
+        Returns:
+            Reconstructed feature vector of shape (feature_dim,)
+        """
+        reconstructed = np.zeros(self.config.feature_dim)
+
+        for level, token in zip(self.levels, tokens):
+            reconstructed += level.decode(token)
+
+        return reconstructed
+
+    def fit(self, features: np.ndarray, n_iterations: int = 50):
+        """
+        Train all RVQ levels sequentially.
+
+        Each level is trained on the residual from the previous level.
+
+        Args:
+            features: Shape (n_samples, feature_dim) training data
+            n_iterations: Number of K-means iterations per level
+        """
+        residuals = features.copy()
+        self.reconstruction_errors = []
+
+        for level_idx, level in enumerate(self.levels):
+            # Train this level on current residuals
+            level.fit(residuals, n_iterations)
+
+            # Compute quantized values
+            tokens = level.encode_batch(residuals)
+            quantized = np.array([level.decode(t) for t in tokens])
+
+            # Compute reconstruction error at this level
+            error = np.mean(np.linalg.norm(residuals - quantized, axis=1))
+            self.reconstruction_errors.append(error)
+
+            # Compute residuals for next level
+            residuals = residuals - quantized
+
+        # Reset usage counts after training
+        for level in self.levels:
+            level.usage_counts = np.zeros(level.config.codebook_size)
+
+    def update_ema(self, features: np.ndarray, tokens: np.ndarray):
+        """
+        Update codebooks using exponential moving average.
+
+        Enables online adaptation to user's patterns.
+
+        Args:
+            features: Shape (batch_size, feature_dim)
+            tokens: Shape (batch_size, n_levels) token indices
+        """
+        if not self.config.use_ema:
+            return
+
+        decay = self.config.ema_decay
+        residuals = features.copy()
+
+        for level_idx, level in enumerate(self.levels):
+            level_tokens = tokens[:, level_idx]
+
+            # Update EMA statistics
+            for i, token in enumerate(level_tokens):
+                self._ema_cluster_size[level_idx][token] = (
+                    decay * self._ema_cluster_size[level_idx][token] + (1 - decay)
+                )
+                self._ema_dw[level_idx][token] = (
+                    decay * self._ema_dw[level_idx][token] +
+                    (1 - decay) * residuals[i]
+                )
+
+            # Update codebook centroids
+            for k in range(level.config.codebook_size):
+                if self._ema_cluster_size[level_idx][k] > 0:
+                    level.codebook[k] = (
+                        self._ema_dw[level_idx][k] /
+                        self._ema_cluster_size[level_idx][k]
+                    )
+
+            # Compute residuals for next level
+            quantized = np.array([level.decode(t) for t in level_tokens])
+            residuals = residuals - quantized
+
+    def get_reconstruction_error(self, features: np.ndarray) -> dict:
+        """
+        Compute reconstruction error for given features.
+
+        Args:
+            features: Shape (n_samples, feature_dim)
+
+        Returns:
+            Dict with error metrics per level and total
+        """
+        tokens = self.encode_batch(features)
+        reconstructed = np.array([self.decode(t) for t in tokens])
+
+        total_error = np.mean(np.linalg.norm(features - reconstructed, axis=1))
+
+        # Per-level errors
+        level_errors = []
+        residuals = features.copy()
+        for level_idx, level in enumerate(self.levels):
+            level_tokens = tokens[:, level_idx]
+            quantized = np.array([level.decode(t) for t in level_tokens])
+            level_error = np.mean(np.linalg.norm(residuals - quantized, axis=1))
+            level_errors.append(level_error)
+            residuals = residuals - quantized
+
+        return {
+            "total_error": float(total_error),
+            "level_errors": level_errors,
+            "error_reduction": [
+                level_errors[0] / (e + 1e-10) for e in level_errors
+            ],
+        }
+
+    def save(self, path: Path):
+        """Save all RVQ levels to directory."""
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Save each level
+        for i, level in enumerate(self.levels):
+            level.save(path / f"level_{i}")
+
+        # Save config
+        config_dict = {
+            "n_levels": self.config.n_levels,
+            "codebook_sizes": list(self.config.codebook_sizes),
+            "feature_dim": self.config.feature_dim,
+            "commitment_cost": self.config.commitment_cost,
+            "ema_decay": self.config.ema_decay,
+            "use_ema": self.config.use_ema,
+            "reconstruction_errors": self.reconstruction_errors,
+        }
+        with open(path / "rvq_config.json", "w") as f:
+            json.dump(config_dict, f, indent=2)
+
+    def load(self, path: Path):
+        """Load all RVQ levels from directory."""
+        path = Path(path)
+
+        # Load config
+        with open(path / "rvq_config.json") as f:
+            config_dict = json.load(f)
+
+        self.config = RVQConfig(
+            n_levels=config_dict["n_levels"],
+            codebook_sizes=tuple(config_dict["codebook_sizes"]),
+            feature_dim=config_dict["feature_dim"],
+            commitment_cost=config_dict["commitment_cost"],
+            ema_decay=config_dict.get("ema_decay", 0.99),
+            use_ema=config_dict.get("use_ema", True),
+        )
+        self.reconstruction_errors = config_dict.get("reconstruction_errors", [])
+
+        # Load each level
+        self.levels = []
+        for i in range(self.config.n_levels):
+            level_config = VQConfig(
+                codebook_size=self.config.codebook_sizes[i],
+                feature_dim=self.config.feature_dim,
+            )
+            level = VectorQuantizer(level_config)
+            level.load(path / f"level_{i}")
+            self.levels.append(level)
+
+    def get_combined_token(self, tokens: list[int]) -> int:
+        """
+        Combine multi-level tokens into single index for intent mapping.
+
+        Uses weighted combination where coarser levels have more weight.
+
+        Args:
+            tokens: List of token indices per level
+
+        Returns:
+            Single combined token index
+        """
+        # Primary token from coarsest level
+        # This captures the main pattern, finer levels are for reconstruction
+        return tokens[0]
+
+    def get_usage_stats(self) -> dict:
+        """Get usage statistics across all levels."""
+        stats = {
+            "levels": [],
+            "total_active_tokens": 0,
+            "avg_utilization": 0.0,
+        }
+
+        for i, level in enumerate(self.levels):
+            level_stats = level.get_usage_stats()
+            level_stats["level"] = i
+            stats["levels"].append(level_stats)
+            stats["total_active_tokens"] += level_stats["active_tokens"]
+
+        if stats["levels"]:
+            stats["avg_utilization"] = np.mean([
+                s["utilization"] for s in stats["levels"]
+            ])
+
+        return stats
+
+
 class IntentMapper:
     """
     Maps VQ tokens to communication intents.
@@ -306,22 +618,44 @@ class EEGTokenizer:
         self,
         sample_rate: int = 256,
         codebook_size: int = 64,
+        use_rvq: bool = False,
+        rvq_config: Optional[RVQConfig] = None,
     ):
         from eleven.features import FeatureExtractor
 
         self.sample_rate = sample_rate
+        self.use_rvq = use_rvq
         self.feature_extractor = FeatureExtractor(sample_rate)
 
-        # Initialize VQ with appropriate feature dimension
-        config = VQConfig(
-            codebook_size=codebook_size,
-            feature_dim=self.feature_extractor.feature_dim,
-        )
-        self.vq = VectorQuantizer(config)
+        if use_rvq:
+            # Use multi-level Residual VQ
+            if rvq_config is None:
+                rvq_config = RVQConfig(
+                    n_levels=3,
+                    codebook_sizes=(32, 64, 128),
+                    feature_dim=self.feature_extractor.feature_dim,
+                )
+            self.rvq = ResidualVectorQuantizer(rvq_config)
+            # For intent mapping, use the RVQ's combined token
+            vq_config = VQConfig(
+                codebook_size=rvq_config.codebook_sizes[0],
+                feature_dim=rvq_config.feature_dim,
+            )
+            self.vq = self.rvq.levels[0]  # Use first level for intent mapping
+        else:
+            # Use single-level K-means VQ
+            config = VQConfig(
+                codebook_size=codebook_size,
+                feature_dim=self.feature_extractor.feature_dim,
+            )
+            self.vq = VectorQuantizer(config)
+            self.rvq = None
+
         self.intent_mapper = IntentMapper(self.vq)
 
         # Token history for sequence classification
         self._token_history: list[int] = []
+        self._rvq_token_history: list[list[int]] = []  # For RVQ multi-level tokens
         self._max_history = 20
 
     def tokenize(self, window: np.ndarray) -> int:
@@ -332,16 +666,50 @@ class EEGTokenizer:
             window: Shape (4, n_samples) filtered EEG data
 
         Returns:
-            Token index
+            Token index (primary token for intent classification)
         """
         features = self.feature_extractor.extract(window)
-        token = self.vq.encode(features)
+
+        if self.use_rvq and self.rvq is not None:
+            # Use RVQ for hierarchical encoding
+            rvq_tokens = self.rvq.encode(features)
+            token = self.rvq.get_combined_token(rvq_tokens)
+
+            # Store full RVQ tokens for reconstruction
+            self._rvq_token_history.append(rvq_tokens)
+            if len(self._rvq_token_history) > self._max_history:
+                self._rvq_token_history.pop(0)
+        else:
+            # Single-level VQ
+            token = self.vq.encode(features)
 
         self._token_history.append(token)
         if len(self._token_history) > self._max_history:
             self._token_history.pop(0)
 
         return token
+
+    def get_rvq_tokens(self) -> Optional[list[int]]:
+        """Get the most recent RVQ multi-level tokens."""
+        if self._rvq_token_history:
+            return self._rvq_token_history[-1]
+        return None
+
+    def get_reconstruction_quality(self, window: np.ndarray) -> Optional[dict]:
+        """
+        Get reconstruction quality metrics for RVQ.
+
+        Args:
+            window: Shape (4, n_samples) filtered EEG data
+
+        Returns:
+            Dict with reconstruction error metrics, or None if not using RVQ
+        """
+        if not self.use_rvq or self.rvq is None:
+            return None
+
+        features = self.feature_extractor.extract(window)
+        return self.rvq.get_reconstruction_error(features.reshape(1, -1))
 
     def get_intent(self) -> tuple[Optional[str], float]:
         """
@@ -372,32 +740,112 @@ class EEGTokenizer:
 
         all_features = np.array(all_features)
 
-        # Train VQ codebook
-        self.vq.fit(all_features)
+        if self.use_rvq and self.rvq is not None:
+            # Train RVQ codebook (all levels)
+            self.rvq.fit(all_features)
 
-        # Map tokens to intents
-        for intent, features_list in intent_features.items():
-            tokens = []
-            for features in features_list:
-                token = self.vq.encode(features)
-                tokens.append(token)
+            # Map tokens to intents using primary (first level) tokens
+            for intent, features_list in intent_features.items():
+                tokens = []
+                for features in features_list:
+                    rvq_tokens = self.rvq.encode(features)
+                    token = self.rvq.get_combined_token(rvq_tokens)
+                    tokens.append(token)
 
-            self.intent_mapper.register_intent(intent, tokens)
+                self.intent_mapper.register_intent(intent, tokens)
+        else:
+            # Train single-level VQ codebook
+            self.vq.fit(all_features)
+
+            # Map tokens to intents
+            for intent, features_list in intent_features.items():
+                tokens = []
+                for features in features_list:
+                    token = self.vq.encode(features)
+                    tokens.append(token)
+
+                self.intent_mapper.register_intent(intent, tokens)
+
+    def adapt_online(self, window: np.ndarray):
+        """
+        Adapt codebook online using EMA updates.
+
+        Call this periodically during streaming to adapt to user's patterns.
+
+        Args:
+            window: Shape (4, n_samples) filtered EEG data
+        """
+        if not self.use_rvq or self.rvq is None:
+            return
+
+        features = self.feature_extractor.extract(window)
+        rvq_tokens = self.rvq.encode(features)
+
+        # Update EMA statistics
+        self.rvq.update_ema(
+            features.reshape(1, -1),
+            np.array([rvq_tokens])
+        )
 
     def save(self, directory: Path):
         """Save tokenizer state to directory."""
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
 
-        self.vq.save(directory / "codebook")
+        # Save config
+        config = {
+            "use_rvq": self.use_rvq,
+            "sample_rate": self.sample_rate,
+        }
+        with open(directory / "tokenizer_config.json", "w") as f:
+            json.dump(config, f, indent=2)
+
+        if self.use_rvq and self.rvq is not None:
+            self.rvq.save(directory / "rvq")
+        else:
+            self.vq.save(directory / "codebook")
+
         self.intent_mapper.save(directory / "intents.json")
 
     def load(self, directory: Path):
         """Load tokenizer state from directory."""
         directory = Path(directory)
 
-        self.vq.load(directory / "codebook")
+        # Load config
+        config_path = directory / "tokenizer_config.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                config = json.load(f)
+            self.use_rvq = config.get("use_rvq", False)
+            self.sample_rate = config.get("sample_rate", 256)
+
+        if self.use_rvq:
+            rvq_path = directory / "rvq"
+            if rvq_path.exists():
+                self.rvq = ResidualVectorQuantizer()
+                self.rvq.load(rvq_path)
+                self.vq = self.rvq.levels[0]
+        else:
+            self.vq.load(directory / "codebook")
+
         self.intent_mapper.load(directory / "intents.json")
+
+    def get_stats(self) -> dict:
+        """Get comprehensive statistics about the tokenizer."""
+        stats = {
+            "use_rvq": self.use_rvq,
+            "sample_rate": self.sample_rate,
+            "feature_dim": self.feature_extractor.feature_dim,
+            "token_history_length": len(self._token_history),
+        }
+
+        if self.use_rvq and self.rvq is not None:
+            stats["rvq_stats"] = self.rvq.get_usage_stats()
+            stats["reconstruction_errors"] = self.rvq.reconstruction_errors
+        else:
+            stats["vq_stats"] = self.vq.get_usage_stats()
+
+        return stats
 
 
 # CLI for testing

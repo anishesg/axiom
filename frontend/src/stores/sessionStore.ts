@@ -44,6 +44,13 @@ export interface AgentAction {
   timestamp: number;
 }
 
+// Signal history entry for timeline
+export interface SignalHistoryEntry {
+  id: number;
+  signal: ControlSignal;
+  timestamp: number;
+}
+
 interface SessionState {
   // Connection
   connectionState: ConnectionState;
@@ -67,6 +74,14 @@ interface SessionState {
   isCalibrated: boolean;
   calibrationProgress: number;
 
+  // Signal history for dashboard/training
+  signalHistory: SignalHistoryEntry[];
+  sessionStartTime: number | null;
+  totalSignalsDetected: number;
+
+  // Raw EEG buffer for visualization (4 channels x samples)
+  rawEEG: number[][];
+
   // Server info
   serverInfo: {
     channels: string[];
@@ -87,6 +102,9 @@ interface SessionState {
   setCalibrated: (calibrated: boolean) => void;
   setCalibrationProgress: (progress: number) => void;
   setServerInfo: (info: SessionState['serverInfo']) => void;
+  addRawEEG: (channels: number[][]) => void;
+  startSession: () => void;
+  clearSignalHistory: () => void;
   reset: () => void;
 }
 
@@ -128,8 +146,14 @@ const initialState = {
   lastSignalTimestamp: null,
   isCalibrated: false,
   calibrationProgress: 0,
+  signalHistory: [] as SignalHistoryEntry[],
+  sessionStartTime: null as number | null,
+  totalSignalsDetected: 0,
+  rawEEG: [] as number[][],
   serverInfo: null,
 };
+
+let signalIdCounter = 0;
 
 export const useSessionStore = create<SessionState>((set) => ({
   ...initialState,
@@ -147,9 +171,22 @@ export const useSessionStore = create<SessionState>((set) => ({
   setLastAction: (lastAction) => set({ lastAction }),
 
   setControlSignal: (signal) =>
-    set({
-      lastControlSignal: signal,
-      lastSignalTimestamp: Date.now(),
+    set((state) => {
+      const now = Date.now();
+      const newEntry: SignalHistoryEntry = {
+        id: signalIdCounter++,
+        signal,
+        timestamp: now,
+      };
+      // Keep last 30 seconds of history (assuming ~1 signal per second max, keep 60 entries)
+      const cutoff = now - 30000;
+      const filteredHistory = state.signalHistory.filter((e) => e.timestamp > cutoff);
+      return {
+        lastControlSignal: signal,
+        lastSignalTimestamp: now,
+        signalHistory: [...filteredHistory, newEntry],
+        totalSignalsDetected: state.totalSignalsDetected + 1,
+      };
     }),
 
   setCalibrated: (isCalibrated) => set({ isCalibrated }),
@@ -158,7 +195,37 @@ export const useSessionStore = create<SessionState>((set) => ({
 
   setServerInfo: (serverInfo) => set({ serverInfo }),
 
-  reset: () => set(initialState),
+  addRawEEG: (channels) =>
+    set((state) => {
+      // Each channel is ~64 samples (256ms window at 256Hz)
+      // Keep last 512 samples per channel (~2 seconds of data)
+      const MAX_SAMPLES = 512;
+      const newRawEEG = channels.map((newChannel, i) => {
+        const existing = state.rawEEG[i] || [];
+        const combined = [...existing, ...newChannel];
+        // Keep only the last MAX_SAMPLES
+        return combined.slice(-MAX_SAMPLES);
+      });
+      return { rawEEG: newRawEEG };
+    }),
+
+  startSession: () =>
+    set({
+      sessionStartTime: Date.now(),
+      signalHistory: [],
+      totalSignalsDetected: 0,
+    }),
+
+  clearSignalHistory: () =>
+    set({
+      signalHistory: [],
+      totalSignalsDetected: 0,
+    }),
+
+  reset: () => {
+    signalIdCounter = 0;
+    set(initialState);
+  },
 }));
 
 // Selector for attention (derived from brain state for backward compatibility)

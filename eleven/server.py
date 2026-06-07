@@ -13,19 +13,55 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, asdict
-from typing import Optional
+from typing import Optional, Set
 from enum import Enum
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from pathlib import Path
+
+import numpy as np
+from brainflow.data_filter import DataFilter, FilterTypes, DetrendOperations, NoiseTypes
+
 from eleven.acquisition import create_acquisition, MuseAcquisition, SimulatedMuse
 from eleven.preprocessing import EEGPreprocessor
-from eleven.artifacts import ArtifactDetector, ControlSignal, DetectionConfig
-from eleven.features import AttentionEstimator
+from eleven.artifacts import ArtifactDetector, ControlSignal, DetectionConfig, CalibrationSession, EnhancedCalibrationSession
+from eleven.features import AttentionEstimator, MultiScaleFeatureExtractor
+from eleven.user_profile import UserProfile, ProfileManager
+from eleven.vq_encoder import EEGTokenizer, RVQConfig
+
+
+def filter_eeg_channel(data: np.ndarray, sample_rate: int = 256) -> np.ndarray:
+    """Apply standard EEG preprocessing to a single channel.
+
+    From research branch - applies detrend, bandpass (1-50Hz), and 60Hz notch filter.
+    """
+    filtered = data.copy()
+    if len(filtered) < 12:
+        return filtered
+    DataFilter.detrend(filtered, DetrendOperations.LINEAR.value)
+    DataFilter.perform_bandpass(
+        filtered, sample_rate,
+        1.0, 50.0, 4,
+        FilterTypes.BUTTERWORTH.value, 0.0,
+    )
+    DataFilter.remove_environmental_noise(
+        filtered, sample_rate, NoiseTypes.SIXTY.value,
+    )
+    return filtered
+
+# Default profiles directory
+PROFILES_DIR = Path.home() / ".eleven" / "profiles"
 
 logger = logging.getLogger(__name__)
+
+# Connection lock to prevent race conditions
+_connection_lock = asyncio.Lock()
+
+# Connection timeout in seconds
+CONNECTION_TIMEOUT = 30.0
 
 
 # ============================================================================
@@ -55,10 +91,80 @@ class SessionConfig(BaseModel):
     notch_freq: float = 60.0  # 50 for Europe, 60 for US
 
 
-class CalibrationRequest(BaseModel):
-    """Request to start calibration."""
-    intent: str
+class ConnectionManager:
+    """Manages WebSocket connections and broadcasts events to all clients."""
+
+    def __init__(self):
+        self.active_connections: Set[WebSocket] = set()
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.add(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.discard(websocket)
+
+    async def broadcast(self, message: dict):
+        """Send message to all connected clients."""
+        if not self.active_connections:
+            return
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                disconnected.append(connection)
+        # Clean up disconnected clients
+        for conn in disconnected:
+            self.active_connections.discard(conn)
+
+
+# Global connection manager for WebSocket broadcast
+ws_manager = ConnectionManager()
+
+
+class CalibrationStep(str, Enum):
+    """Calibration steps."""
+    REST = "rest"
+    NATURAL_BLINKS = "natural_blinks"
+    DELIBERATE_BLINKS = "deliberate_blinks"
+    JAW_CLENCHES = "jaw_clenches"
+
+
+class CalibrationStepRequest(BaseModel):
+    """Request to start a calibration step."""
+    step: CalibrationStep
     duration_seconds: float = 5.0
+
+
+class CalibrationStatus(BaseModel):
+    """Current calibration status."""
+    active: bool
+    current_step: Optional[str] = None
+    progress: float = 0.0
+    samples_collected: int = 0
+    completed_steps: list[str] = []
+
+
+class ProfileResponse(BaseModel):
+    """User profile response."""
+    user_id: str
+    created_at: str
+    calibration_complete: bool
+    baseline_collected: bool
+    intents_trained: list[str] = []
+    total_sessions: int = 0
+
+
+class BaselineStartRequest(BaseModel):
+    """Request to start baseline collection."""
+    duration_seconds: float = 120.0  # 2 minutes default
+
+
+class EnhancedCalibrationStepRequest(BaseModel):
+    """Request for enhanced calibration step."""
+    step_id: str
+    duration_seconds: Optional[float] = None  # Use default from step config
 
 
 # ============================================================================
@@ -92,24 +198,53 @@ class EEGSession:
         self._process_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
 
+        # Calibration
+        self.calibration: Optional[CalibrationSession] = None
+        self._calibration_step: Optional[CalibrationStep] = None
+        self._calibration_start_time: float = 0.0
+        self._calibration_duration: float = 0.0
+        self._calibration_samples: int = 0
+        self._completed_steps: list[str] = []
+
     async def connect(self) -> bool:
         """Connect to Muse headband."""
         if self.state != SessionState.DISCONNECTED:
+            logger.warning(f"Cannot connect: current state is {self.state.value}")
             return False
 
         self.state = SessionState.CONNECTING
+        logger.info(f"Starting connection (simulation={self.config.use_simulation})...")
 
         try:
             # Create acquisition
             self.muse = create_acquisition(use_simulation=self.config.use_simulation)
+            logger.info("Acquisition created, starting BLE scan...")
 
-            # Connect in thread pool (blocking operation)
+            # Connect in thread pool with timeout (blocking operation)
             loop = asyncio.get_event_loop()
-            success = await loop.run_in_executor(None, self.muse.connect)
+            try:
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, self.muse.connect),
+                    timeout=CONNECTION_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Connection timed out after {CONNECTION_TIMEOUT}s")
+                self.state = SessionState.ERROR
+                # Clean up the muse object
+                if self.muse:
+                    try:
+                        self.muse.disconnect()
+                    except Exception:
+                        pass
+                    self.muse = None
+                return False
 
             if not success:
+                logger.error("Muse connection returned False")
                 self.state = SessionState.ERROR
                 return False
+
+            logger.info("BLE connection successful, initializing pipeline...")
 
             # Initialize processing pipeline
             sample_rate = self.muse.get_sample_rate()
@@ -122,6 +257,7 @@ class EEGSession:
 
             self.state = SessionState.CONNECTED
             await self._emit_event("connection", {"status": "connected"})
+            logger.info("Connection complete - state: CONNECTED")
 
             return True
 
@@ -167,6 +303,25 @@ class EEGSession:
                 for window in windows:
                     timestamp = time.time()
 
+                    # Feed window to enhanced calibration if active
+                    if hasattr(self, '_enhanced_calibration'):
+                        self._enhanced_calibration.add_window(window, timestamp)
+
+                        # Emit progress events (throttled to ~1/sec)
+                        enhanced_cal = self._enhanced_calibration
+                        if enhanced_cal._is_collecting and enhanced_cal.current_step:
+                            step = enhanced_cal.current_step
+                            step_id = step["id"]
+                            samples = len(enhanced_cal._collected_windows.get(step_id, []))
+                            # Only emit every 4 samples (~1/sec at 4 windows/sec)
+                            if samples % 4 == 0:
+                                elapsed = timestamp - (enhanced_cal._step_start_time or timestamp)
+                                await self._emit_event("calibration_progress", {
+                                    "step_id": step_id,
+                                    "samples_collected": samples,
+                                    "elapsed_seconds": round(elapsed, 1),
+                                })
+
                     # Check for artifacts (control signals)
                     signal = self.artifact_detector.process(window, timestamp)
                     if signal is not None and signal != ControlSignal.NONE:
@@ -177,6 +332,24 @@ class EEGSession:
                     # Compute attention metrics
                     attention = self.attention_estimator.estimate(window)
                     await self._emit_event("attention", attention)
+
+                    # Emit EEG data for visualization (~4Hz, every window)
+                    # Skip additional filtering - preprocessing already handles this
+                    eeg_data = window[:4]  # Shape: (4, samples)
+
+                    # Protect against any stray NaN/Inf values
+                    eeg_data = np.nan_to_num(eeg_data, nan=0.0, posinf=0.0, neginf=0.0)
+
+                    # Downsample by 4 for efficiency (256Hz → 64Hz display)
+                    downsampled = eeg_data[:, ::4]
+
+                    # Send downsampled data
+                    await self._emit_event("eeg", {
+                        "channels": ["TP9", "AF7", "AF8", "TP10"],
+                        "data": downsampled.tolist(),
+                        "sampleRate": 64,
+                        "timestamp": timestamp,
+                    })
 
                 # Small delay to prevent busy-waiting
                 await asyncio.sleep(0.01)
@@ -231,16 +404,170 @@ class EEGSession:
         """Get next event from queue."""
         return await self.event_queue.get()
 
+    # Calibration methods
+    async def start_calibration(self):
+        """Start a new calibration session."""
+        if self.state not in (SessionState.CONNECTED, SessionState.STREAMING):
+            return False
+
+        self.calibration = CalibrationSession()
+        self._completed_steps = []
+        self.state = SessionState.CALIBRATING
+        await self._emit_event("calibration", {
+            "status": "started",
+            "message": "Calibration session started"
+        })
+        return True
+
+    async def start_calibration_step(self, step: CalibrationStep, duration: float):
+        """Start collecting data for a calibration step."""
+        if self.calibration is None:
+            return False
+
+        self._calibration_step = step
+        self._calibration_start_time = time.time()
+        self._calibration_duration = duration
+        self._calibration_samples = 0
+
+        self.calibration.start_step(step.value)
+
+        await self._emit_event("calibration_step", {
+            "status": "started",
+            "step": step.value,
+            "duration": duration,
+            "message": self._get_step_instruction(step)
+        })
+        return True
+
+    def _get_step_instruction(self, step: CalibrationStep) -> str:
+        """Get user instruction for calibration step."""
+        instructions = {
+            CalibrationStep.REST: "Relax and keep your eyes open. Try not to blink.",
+            CalibrationStep.NATURAL_BLINKS: "Blink naturally as you normally would.",
+            CalibrationStep.DELIBERATE_BLINKS: "Blink firmly and deliberately when you see the prompt.",
+            CalibrationStep.JAW_CLENCHES: "Clench your jaw firmly when you see the prompt.",
+        }
+        return instructions.get(step, "Follow the on-screen instructions.")
+
+    async def end_calibration_step(self):
+        """End the current calibration step."""
+        if self.calibration is None or self._calibration_step is None:
+            return False
+
+        self.calibration.end_step(self._calibration_step.value)
+        self._completed_steps.append(self._calibration_step.value)
+
+        await self._emit_event("calibration_step", {
+            "status": "completed",
+            "step": self._calibration_step.value,
+            "samples": self._calibration_samples
+        })
+
+        self._calibration_step = None
+        return True
+
+    async def complete_calibration(self) -> Optional[DetectionConfig]:
+        """Complete calibration and get personalized thresholds."""
+        if self.calibration is None:
+            return None
+
+        config = self.calibration.get_config()
+
+        # Apply the new thresholds
+        if self.artifact_detector:
+            self.artifact_detector = ArtifactDetector(config)
+
+        await self._emit_event("calibration", {
+            "status": "completed",
+            "thresholds": {
+                "blink_threshold": config.blink_threshold,
+                "clench_threshold": config.clench_threshold,
+            }
+        })
+
+        self.state = SessionState.CONNECTED
+        return config
+
+    def get_calibration_status(self) -> dict:
+        """Get current calibration status."""
+        if self.calibration is None:
+            return {
+                "active": False,
+                "current_step": None,
+                "progress": 0.0,
+                "samples_collected": 0,
+                "completed_steps": []
+            }
+
+        progress = 0.0
+        if self._calibration_step and self._calibration_duration > 0:
+            elapsed = time.time() - self._calibration_start_time
+            progress = min(1.0, elapsed / self._calibration_duration)
+
+        return {
+            "active": True,
+            "current_step": self._calibration_step.value if self._calibration_step else None,
+            "progress": progress,
+            "samples_collected": self._calibration_samples,
+            "completed_steps": self._completed_steps
+        }
+
+    def add_calibration_sample(self, amplitude: float):
+        """Add a sample during calibration."""
+        if self.calibration and self._calibration_step:
+            self.calibration.add_sample(amplitude)
+            self._calibration_samples += 1
+
 
 # ============================================================================
 # Global Session (single user for now)
 # ============================================================================
 
 _session: Optional[EEGSession] = None
+_profile_manager: Optional[ProfileManager] = None
+_current_user_id: str = "default"
 
 
 def get_session() -> Optional[EEGSession]:
     return _session
+
+
+def get_profile_manager() -> ProfileManager:
+    global _profile_manager
+    if _profile_manager is None:
+        _profile_manager = ProfileManager(PROFILES_DIR)
+    return _profile_manager
+
+
+# ============================================================================
+# WebSocket Event Broadcasting
+# ============================================================================
+
+async def broadcast_events():
+    """Background task to broadcast events to all WebSocket clients."""
+    while True:
+        session = get_session()
+        if session is None:
+            await asyncio.sleep(0.1)
+            continue
+
+        try:
+            event = await asyncio.wait_for(
+                session.get_event(),
+                timeout=1.0
+            )
+            await ws_manager.broadcast(event.model_dump())
+        except asyncio.TimeoutError:
+            # Send heartbeat to all clients
+            if ws_manager.active_connections:
+                await ws_manager.broadcast({
+                    "type": "heartbeat",
+                    "timestamp": time.time(),
+                    "data": {"state": session.state.value}
+                })
+        except Exception as e:
+            logger.error(f"Broadcast error: {e}")
+            await asyncio.sleep(0.1)
 
 
 # ============================================================================
@@ -251,8 +578,21 @@ def get_session() -> Optional[EEGSession]:
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Eleven server starting...")
+
+    # Start the event broadcast task
+    broadcast_task = asyncio.create_task(broadcast_events())
+    logger.info("WebSocket broadcast task started")
+
     yield
+
     logger.info("Eleven server shutting down...")
+
+    # Cancel broadcast task
+    broadcast_task.cancel()
+    try:
+        await broadcast_task
+    except asyncio.CancelledError:
+        pass
 
     # Cleanup session
     global _session
@@ -271,7 +611,7 @@ app = FastAPI(
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://localhost:5177"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -302,16 +642,44 @@ async def connect_session(config: SessionConfig):
     """Connect to Muse headband."""
     global _session
 
-    if _session and _session.state != SessionState.DISCONNECTED:
-        raise HTTPException(400, "Session already active")
+    logger.info(f"Connect request received (simulation={config.use_simulation})")
 
-    _session = EEGSession(config)
-    success = await _session.connect()
+    # Use lock to prevent concurrent connection attempts
+    if _connection_lock.locked():
+        logger.warning("Connection already in progress, rejecting duplicate request")
+        raise HTTPException(409, "Connection already in progress")
 
-    if not success:
-        raise HTTPException(500, "Failed to connect to Muse")
+    async with _connection_lock:
+        # Only reject if actively streaming or calibrating (states we shouldn't interrupt)
+        if _session and _session.state in (SessionState.STREAMING, SessionState.CALIBRATING):
+            logger.warning(f"Rejecting connect: session state is {_session.state.value}")
+            raise HTTPException(400, "Session already active - streaming or calibrating")
 
-    return {"status": "connected"}
+        # Clean up any existing session before creating a new one
+        if _session:
+            logger.info(f"Cleaning up existing session (state={_session.state.value})")
+            try:
+                await _session.disconnect()
+            except Exception as e:
+                logger.warning(f"Error disconnecting existing session: {e}")
+            _session = None
+
+        # Force cleanup any stale BrainFlow sessions that may have been left behind
+        # from interrupted connections (e.g., timeout during BLE discovery)
+        MuseAcquisition.force_cleanup_all()
+
+        logger.info("Creating new session...")
+        _session = EEGSession(config)
+        success = await _session.connect()
+
+        if not success:
+            # Clean up failed session
+            logger.error("Connection failed, cleaning up session")
+            _session = None
+            raise HTTPException(500, "Failed to connect to Muse - check if device is powered on and nearby")
+
+        logger.info("Connection successful!")
+        return {"status": "connected"}
 
 
 @app.post("/session/start")
@@ -349,6 +717,347 @@ async def disconnect_session():
 
 
 # ============================================================================
+# Calibration Endpoints
+# ============================================================================
+
+@app.post("/calibration/start")
+async def start_calibration():
+    """Start a new calibration session."""
+    session = get_session()
+    if session is None:
+        raise HTTPException(400, "No session - connect first")
+
+    if session.state not in (SessionState.CONNECTED, SessionState.STREAMING):
+        raise HTTPException(400, f"Cannot calibrate in state: {session.state.value}")
+
+    success = await session.start_calibration()
+    if not success:
+        raise HTTPException(500, "Failed to start calibration")
+
+    return {"status": "calibrating"}
+
+
+@app.post("/calibration/step")
+async def start_calibration_step(request: CalibrationStepRequest):
+    """Start a specific calibration step."""
+    session = get_session()
+    if session is None or session.calibration is None:
+        raise HTTPException(400, "No active calibration session")
+
+    success = await session.start_calibration_step(request.step, request.duration_seconds)
+    if not success:
+        raise HTTPException(500, "Failed to start calibration step")
+
+    return {
+        "status": "collecting",
+        "step": request.step.value,
+        "duration": request.duration_seconds
+    }
+
+
+@app.post("/calibration/end-step")
+async def end_calibration_step():
+    """End the current calibration step."""
+    session = get_session()
+    if session is None or session.calibration is None:
+        raise HTTPException(400, "No active calibration session")
+
+    success = await session.end_calibration_step()
+    if not success:
+        raise HTTPException(400, "No active calibration step")
+
+    return {"status": "step_completed"}
+
+
+@app.post("/calibration/complete")
+async def complete_calibration():
+    """Complete calibration and apply personalized thresholds."""
+    session = get_session()
+    if session is None or session.calibration is None:
+        raise HTTPException(400, "No active calibration session")
+
+    config = await session.complete_calibration()
+    if config is None:
+        raise HTTPException(500, "Failed to complete calibration")
+
+    return {
+        "status": "completed",
+        "thresholds": {
+            "blink_threshold": config.blink_threshold,
+            "clench_threshold": config.clench_threshold,
+        }
+    }
+
+
+@app.get("/calibration/status")
+async def get_calibration_status():
+    """Get current calibration status."""
+    session = get_session()
+    if session is None:
+        return CalibrationStatus(active=False)
+
+    status = session.get_calibration_status()
+    return CalibrationStatus(**status)
+
+
+# ============================================================================
+# Profile Endpoints
+# ============================================================================
+
+@app.get("/profiles")
+async def list_profiles():
+    """List all available user profiles."""
+    manager = get_profile_manager()
+    profiles = manager.list_profiles()
+    return {"profiles": profiles}
+
+
+@app.post("/profiles/{user_id}")
+async def create_profile(user_id: str):
+    """Create a new user profile."""
+    manager = get_profile_manager()
+    try:
+        profile = manager.create_profile(user_id)
+        return ProfileResponse(
+            user_id=profile.user_id,
+            created_at=profile.created_at,
+            calibration_complete=profile.progress.is_complete(),
+            baseline_collected=profile.progress.baseline_collected,
+            intents_trained=profile.intent_names,
+            total_sessions=profile.total_sessions,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/profiles/{user_id}")
+async def get_profile(user_id: str):
+    """Get a user profile."""
+    manager = get_profile_manager()
+    try:
+        profile = manager.load_profile(user_id)
+        return ProfileResponse(
+            user_id=profile.user_id,
+            created_at=profile.created_at,
+            calibration_complete=profile.progress.is_complete(),
+            baseline_collected=profile.progress.baseline_collected,
+            intents_trained=profile.intent_names,
+            total_sessions=profile.total_sessions,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.delete("/profiles/{user_id}")
+async def delete_profile(user_id: str):
+    """Delete a user profile."""
+    manager = get_profile_manager()
+    manager.delete_profile(user_id)
+    return {"status": "deleted", "user_id": user_id}
+
+
+@app.post("/profiles/{user_id}/activate")
+async def activate_profile(user_id: str):
+    """Set the active profile for the current session."""
+    global _current_user_id
+    manager = get_profile_manager()
+
+    try:
+        manager.set_current(user_id)
+        _current_user_id = user_id
+        return {"status": "activated", "user_id": user_id}
+    except ValueError as e:
+        # Profile doesn't exist, create it
+        manager.create_profile(user_id)
+        manager.set_current(user_id)
+        _current_user_id = user_id
+        return {"status": "created_and_activated", "user_id": user_id}
+
+
+# ============================================================================
+# Enhanced Calibration Endpoints (VQ/RVQ)
+# ============================================================================
+
+@app.post("/calibration/enhanced/start/{user_id}")
+async def start_enhanced_calibration(user_id: str):
+    """
+    Start an enhanced calibration session with RVQ training.
+
+    This creates an EnhancedCalibrationSession that includes:
+    - Baseline collection
+    - State calibration (focus, relax, neutral)
+    - Action calibration (blinks, clenches)
+    - RVQ codebook training
+    """
+    session = get_session()
+    if session is None:
+        raise HTTPException(400, "No EEG session - connect first")
+
+    if session.state not in (SessionState.CONNECTED, SessionState.STREAMING):
+        raise HTTPException(400, f"Cannot calibrate in state: {session.state.value}")
+
+    # Create enhanced calibration session
+    enhanced_cal = EnhancedCalibrationSession(user_id=user_id)
+
+    # Store on session for access in other endpoints
+    session._enhanced_calibration = enhanced_cal
+
+    return {
+        "status": "started",
+        "user_id": user_id,
+        "steps": [
+            {"id": s["id"], "name": s["name"], "duration": s["duration"]}
+            for s in EnhancedCalibrationSession.STEPS
+        ]
+    }
+
+
+@app.post("/calibration/enhanced/step")
+async def start_enhanced_calibration_step(request: EnhancedCalibrationStepRequest):
+    """Start an enhanced calibration step."""
+    session = get_session()
+    if session is None or not hasattr(session, '_enhanced_calibration'):
+        raise HTTPException(400, "No enhanced calibration session active")
+
+    enhanced_cal = session._enhanced_calibration
+    success = enhanced_cal.start_step(request.step_id)
+
+    if not success:
+        raise HTTPException(400, f"Invalid step: {request.step_id}")
+
+    step = enhanced_cal.current_step
+    return {
+        "status": "started",
+        "step_id": request.step_id,
+        "name": step["name"] if step else "",
+        "duration": step["duration"] if step else 0,
+        "instruction": step["instruction"] if step else "",
+    }
+
+
+@app.post("/calibration/enhanced/end-step")
+async def end_enhanced_calibration_step():
+    """End the current enhanced calibration step."""
+    session = get_session()
+    if session is None or not hasattr(session, '_enhanced_calibration'):
+        raise HTTPException(400, "No enhanced calibration session active")
+
+    enhanced_cal = session._enhanced_calibration
+    results = enhanced_cal.end_step()
+
+    return {"status": "completed", "results": results}
+
+
+@app.get("/calibration/enhanced/readiness")
+async def get_calibration_readiness():
+    """
+    Check if enough data has been collected for training.
+
+    Returns readiness status, collected states, and recommendations.
+    """
+    session = get_session()
+    if session is None or not hasattr(session, '_enhanced_calibration'):
+        raise HTTPException(400, detail={
+            "code": "NO_SESSION",
+            "message": "No enhanced calibration session active",
+            "recoverable": True,
+            "action": "Start enhanced calibration first"
+        })
+
+    return session._enhanced_calibration.get_training_readiness()
+
+
+@app.post("/calibration/enhanced/train")
+async def train_vq_tokenizer(use_rvq: bool = True):
+    """
+    Train the VQ/RVQ tokenizer on collected calibration data.
+
+    Args:
+        use_rvq: Whether to use Residual VQ (recommended, default True)
+    """
+    session = get_session()
+    if session is None or not hasattr(session, '_enhanced_calibration'):
+        raise HTTPException(400, detail={
+            "code": "NO_SESSION",
+            "message": "No enhanced calibration session active",
+            "recoverable": True,
+            "action": "Call /calibration/enhanced/start/{user_id} first"
+        })
+
+    enhanced_cal = session._enhanced_calibration
+
+    # Check readiness before training
+    readiness = enhanced_cal.get_training_readiness()
+    if not readiness["ready"]:
+        raise HTTPException(400, detail={
+            "code": "INSUFFICIENT_DATA",
+            "message": "No training data collected",
+            "recoverable": False,
+            "collected": readiness["collected_states"],
+            "missing": readiness["missing_states"],
+            "action": readiness["recommendation"]
+        })
+
+    # Train the tokenizer
+    results = enhanced_cal.train_tokenizer(use_rvq=use_rvq)
+
+    if "error" in results:
+        raise HTTPException(400, detail={
+            "code": "TRAINING_FAILED",
+            "message": results["error"],
+            "recoverable": False,
+            "action": "Restart calibration and complete state steps"
+        })
+
+    return {"status": "trained", "results": results}
+
+
+@app.post("/calibration/enhanced/complete")
+async def complete_enhanced_calibration():
+    """Complete enhanced calibration and save the profile."""
+    session = get_session()
+    if session is None or not hasattr(session, '_enhanced_calibration'):
+        raise HTTPException(400, "No enhanced calibration session active")
+
+    enhanced_cal = session._enhanced_calibration
+
+    # Update thresholds
+    enhanced_cal.update_thresholds()
+
+    # Save results
+    profile_dir = PROFILES_DIR / enhanced_cal.user_id
+    enhanced_cal.save_results(profile_dir)
+
+    # Get detection config and apply to session
+    config = enhanced_cal.get_detection_config()
+    if session.artifact_detector:
+        session.artifact_detector = ArtifactDetector(config)
+
+    # Clean up
+    delattr(session, '_enhanced_calibration')
+
+    return {
+        "status": "completed",
+        "user_id": enhanced_cal.user_id,
+        "thresholds": {
+            "blink_threshold": config.blink_threshold,
+            "clench_threshold": config.clench_threshold,
+        }
+    }
+
+
+@app.get("/calibration/enhanced/steps")
+async def get_enhanced_calibration_steps():
+    """Get all enhanced calibration steps."""
+    return {
+        "steps": [
+            {"id": s["id"], "name": s["name"], "duration": s["duration"], "instruction": s["instruction"]}
+            for s in EnhancedCalibrationSession.STEPS
+        ]
+    }
+
+
+# ============================================================================
 # WebSocket Endpoint
 # ============================================================================
 
@@ -357,44 +1066,33 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     WebSocket endpoint for real-time EEG events.
 
+    Events are broadcast to all clients by the background broadcast_events task.
+    This endpoint just manages the connection lifecycle.
+
     Events sent to client:
     - connection: {status: "connected" | "disconnected"}
     - streaming: {status: "started" | "stopped"}
     - control_signal: {signal: "single_blink" | "double_blink" | ...}
     - attention: {focus: 0-1, relaxation: 0-1, engagement: 0-1}
+    - eeg_raw: {channels: [[...], [...], ...], timestamp: float}
     """
-    await websocket.accept()
-    logger.info("WebSocket client connected")
-
-    session = get_session()
+    await ws_manager.connect(websocket)
+    logger.info(f"WebSocket client connected (total: {len(ws_manager.active_connections)})")
 
     try:
         while True:
-            if session is None:
-                session = get_session()
-                await asyncio.sleep(0.1)
-                continue
-
             try:
-                # Wait for events with timeout
-                event = await asyncio.wait_for(
-                    session.get_event(),
-                    timeout=1.0
-                )
-                await websocket.send_json(event.model_dump())
-
-            except asyncio.TimeoutError:
-                # Send heartbeat
-                await websocket.send_json({
-                    "type": "heartbeat",
-                    "timestamp": time.time(),
-                    "data": {"state": session.state.value}
-                })
-
+                # receive() handles all message types including disconnect gracefully
+                await websocket.receive()
+            except RuntimeError as e:
+                # Handle "Cannot call receive once disconnect received"
+                logger.debug(f"WebSocket receive error: {e}")
+                break
     except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        pass
+    finally:
+        ws_manager.disconnect(websocket)
+        logger.info(f"WebSocket client disconnected (total: {len(ws_manager.active_connections)})")
 
 
 # ============================================================================

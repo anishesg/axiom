@@ -33,7 +33,7 @@ class MuseConfig:
     board_id: int = MUSE_S_BOARD_ID
     serial_port: str = ""  # Usually empty for Bluetooth
     mac_address: str = ""  # Optional: specific device MAC
-    timeout: int = 15  # Connection timeout in seconds
+    timeout: int = 30  # Connection timeout in seconds (increased for reliable BLE discovery)
     buffer_size: int = 450000  # ~30 minutes of data at 256 Hz * 4 channels
 
 
@@ -250,14 +250,32 @@ class MuseAcquisition:
         """Disconnect from Muse S and release resources."""
         self.stop_stream()
 
-        if self.is_connected and self.board is not None:
+        # Always try to release the board if it exists, regardless of is_connected flag.
+        # This handles cases where timeout interrupted prepare_session() before
+        # is_connected was set to True, leaving BrainFlow resources in a bad state.
+        if self.board is not None:
             try:
                 self.board.release_session()
                 logger.info("Disconnected from Muse S")
             except Exception as e:
-                logger.error(f"Error disconnecting: {e}")
-            self.is_connected = False
-            self.board = None
+                logger.warning(f"Error releasing board session: {e}")
+            finally:
+                self.board = None
+
+        self.is_connected = False
+
+    @classmethod
+    def force_cleanup_all(cls):
+        """Force cleanup any stale BrainFlow sessions.
+
+        Call this before creating a new MuseAcquisition if previous sessions
+        may have been interrupted (e.g., timeout during BLE discovery).
+        """
+        try:
+            BoardShim.release_all_sessions()
+            logger.info("Force released all BrainFlow sessions")
+        except Exception as e:
+            logger.warning(f"Error during force cleanup: {e}")
 
     def __enter__(self):
         """Context manager entry."""

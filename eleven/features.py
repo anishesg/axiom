@@ -12,6 +12,7 @@ from scipy import signal
 from scipy.fft import rfft, rfftfreq
 from dataclasses import dataclass
 from typing import Optional
+from pathlib import Path
 
 
 # EEG frequency bands
@@ -155,6 +156,94 @@ def compute_spectral_features(
     return np.array(features)
 
 
+def compute_channel_correlations(data: np.ndarray) -> np.ndarray:
+    """
+    Compute cross-channel correlation features.
+
+    Captures hemispheric interactions and inter-channel coherence.
+
+    Args:
+        data: Shape (n_channels, n_samples) EEG data
+
+    Returns:
+        Feature vector of shape (n_features,) containing:
+        - Pairwise correlations (6 pairs for 4 channels)
+        - Left-right coherence (frontal and temporal)
+        - Front-back coherence
+    """
+    n_channels = data.shape[0]
+    features = []
+
+    # Pairwise Pearson correlations
+    # Channel order: TP9(0), AF7(1), AF8(2), TP10(3)
+    for i in range(n_channels):
+        for j in range(i + 1, n_channels):
+            corr = np.corrcoef(data[i], data[j])[0, 1]
+            features.append(corr if not np.isnan(corr) else 0)
+
+    # Left-right coherence
+    # Frontal: AF7(1) vs AF8(2)
+    frontal_coherence = np.abs(np.corrcoef(data[1], data[2])[0, 1])
+    features.append(frontal_coherence if not np.isnan(frontal_coherence) else 0)
+
+    # Temporal: TP9(0) vs TP10(3)
+    temporal_coherence = np.abs(np.corrcoef(data[0], data[3])[0, 1])
+    features.append(temporal_coherence if not np.isnan(temporal_coherence) else 0)
+
+    # Front-back coherence (average)
+    # Left: TP9(0) vs AF7(1)
+    left_fb = np.abs(np.corrcoef(data[0], data[1])[0, 1])
+    # Right: TP10(3) vs AF8(2)
+    right_fb = np.abs(np.corrcoef(data[3], data[2])[0, 1])
+    fb_coherence = (left_fb + right_fb) / 2 if not (np.isnan(left_fb) or np.isnan(right_fb)) else 0
+    features.append(fb_coherence)
+
+    return np.array(features)
+
+
+def compute_multiscale_spectral(
+    data: np.ndarray,
+    sample_rate: int = 256,
+    short_window: int = 64,   # 250ms for fast transients
+    long_window: int = 256,   # 1s for sustained states
+) -> np.ndarray:
+    """
+    Compute spectral features at multiple time scales.
+
+    Short windows capture fast events (blinks, artifacts).
+    Long windows capture sustained brain states (focus, relaxation).
+
+    Args:
+        data: Shape (n_channels, n_samples) EEG data
+        sample_rate: Sampling rate in Hz
+        short_window: Short window size in samples
+        long_window: Long window size in samples
+
+    Returns:
+        Feature vector combining short and long scale features
+    """
+    features = []
+
+    # Long-scale features (full window)
+    long_features = compute_spectral_features(data, sample_rate)
+    features.extend(long_features)
+
+    # Short-scale features (last portion of window)
+    if data.shape[1] >= short_window:
+        short_data = data[:, -short_window:]
+        short_features = compute_spectral_features(short_data, sample_rate)
+        features.extend(short_features)
+
+        # Ratio of short to long scale (captures transient vs sustained)
+        # Use a subset of features to avoid dimension explosion
+        n_ratio_features = 5  # Band powers only
+        for i in range(n_ratio_features):
+            ratio = short_features[i] / (long_features[i] + 1e-10)
+            features.append(np.clip(ratio, 0, 10))  # Clip extreme ratios
+
+    return np.array(features)
+
+
 def compute_temporal_features(data: np.ndarray) -> np.ndarray:
     """
     Compute time-domain features.
@@ -235,6 +324,142 @@ class FeatureExtractor:
             dummy = np.random.randn(4, 256)
             self.extract(dummy)
         return self._feature_dim
+
+
+class MultiScaleFeatureExtractor:
+    """
+    Multi-scale feature extractor for enhanced VQ encoding.
+
+    Combines:
+    - Multi-scale spectral features (short + long windows)
+    - Channel correlations (hemispheric coherence)
+    - Temporal features (Hjorth parameters, statistics)
+
+    Produces ~150 features for RVQ encoding.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = 256,
+        short_window: int = 64,
+        long_window: int = 256,
+    ):
+        self.sample_rate = sample_rate
+        self.short_window = short_window
+        self.long_window = long_window
+        self._feature_dim: Optional[int] = None
+
+        # Running statistics for Z-score normalization
+        self._feature_mean: Optional[np.ndarray] = None
+        self._feature_std: Optional[np.ndarray] = None
+        self._baseline_collected = False
+
+    def extract(self, window: np.ndarray, normalize: bool = True) -> np.ndarray:
+        """
+        Extract multi-scale features from an EEG window.
+
+        Args:
+            window: Shape (4, n_samples) filtered EEG data
+            normalize: Whether to apply Z-score normalization
+
+        Returns:
+            Feature vector of shape (n_features,)
+        """
+        # Multi-scale spectral features
+        spectral = compute_multiscale_spectral(
+            window, self.sample_rate,
+            self.short_window, self.long_window
+        )
+
+        # Channel correlations
+        correlations = compute_channel_correlations(window)
+
+        # Temporal features
+        temporal = compute_temporal_features(window)
+
+        # Combine all features
+        features = np.concatenate([spectral, correlations, temporal])
+
+        if self._feature_dim is None:
+            self._feature_dim = len(features)
+
+        # Apply Z-score normalization if baseline is available
+        if normalize and self._baseline_collected:
+            features = self._normalize(features)
+
+        return features
+
+    def collect_baseline(self, windows: list[np.ndarray]):
+        """
+        Collect baseline statistics from resting EEG.
+
+        Should be called during calibration with eyes-open rest data.
+
+        Args:
+            windows: List of EEG windows from resting state
+        """
+        all_features = []
+        for window in windows:
+            features = self.extract(window, normalize=False)
+            all_features.append(features)
+
+        all_features = np.array(all_features)
+        self._feature_mean = np.mean(all_features, axis=0)
+        self._feature_std = np.std(all_features, axis=0)
+        self._feature_std = np.maximum(self._feature_std, 1e-10)  # Prevent division by zero
+        self._baseline_collected = True
+
+    def _normalize(self, features: np.ndarray) -> np.ndarray:
+        """Apply Z-score normalization using baseline statistics."""
+        if self._feature_mean is None or self._feature_std is None:
+            return features
+        return (features - self._feature_mean) / self._feature_std
+
+    @property
+    def feature_dim(self) -> int:
+        """Get feature dimension (call extract once first)."""
+        if self._feature_dim is None:
+            # Compute on dummy data
+            dummy = np.random.randn(4, self.long_window)
+            self.extract(dummy, normalize=False)
+        return self._feature_dim
+
+    def save_baseline(self, path: Path):
+        """Save baseline statistics to file."""
+        from pathlib import Path
+        import json
+
+        path = Path(path)
+        if self._baseline_collected:
+            np.save(path.with_suffix(".mean.npy"), self._feature_mean)
+            np.save(path.with_suffix(".std.npy"), self._feature_std)
+            with open(path.with_suffix(".json"), "w") as f:
+                json.dump({
+                    "sample_rate": self.sample_rate,
+                    "short_window": self.short_window,
+                    "long_window": self.long_window,
+                    "feature_dim": self._feature_dim,
+                }, f, indent=2)
+
+    def load_baseline(self, path: Path):
+        """Load baseline statistics from file."""
+        from pathlib import Path
+        import json
+
+        path = Path(path)
+        mean_path = path.with_suffix(".mean.npy")
+        std_path = path.with_suffix(".std.npy")
+        config_path = path.with_suffix(".json")
+
+        if mean_path.exists() and std_path.exists():
+            self._feature_mean = np.load(mean_path)
+            self._feature_std = np.load(std_path)
+            self._baseline_collected = True
+
+            if config_path.exists():
+                with open(config_path) as f:
+                    config = json.load(f)
+                self._feature_dim = config.get("feature_dim")
 
 
 class AttentionEstimator:
