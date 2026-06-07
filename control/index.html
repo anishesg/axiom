@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robot Car</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0a0a0a; color: #d0d0d0;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  min-height: 100vh; gap: 22px;
+  user-select: none;
+}
+
+h1 { font-size: 0.9rem; letter-spacing: 0.25em; color: #333; text-transform: uppercase; }
+
+/* ── Connection pill ── */
+#pill {
+  display: flex; align-items: center; gap: 9px;
+  background: #111; border: 1px solid #1e1e1e;
+  border-radius: 20px; padding: 6px 16px; font-size: 0.72rem;
+  transition: border-color 300ms;
+}
+#pill.ble  { border-color: #1a4a2a; }
+#pill.both { border-color: #1a4a2a; }
+#pill.usb  { border-color: #1e3a5a; }
+#pill.none { border-color: #1e1e1e; }
+#pill.scanning { border-color: #3a3a1a; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #252525; transition: background 300ms; }
+#pill.ble .dot, #pill.both .dot { background: #4acf6a; box-shadow: 0 0 5px #4acf6a66; }
+#pill.usb .dot { background: #4a8acf; box-shadow: 0 0 5px #4a8acf66; }
+#pill.scanning .dot { background: #cfcf4a; box-shadow: 0 0 5px #cfcf4a66; }
+#pill.none .dot { background: #333; }
+#pill-text { color: #444; }
+#pill.ble #pill-text, #pill.both #pill-text { color: #4acf6a; }
+#pill.usb #pill-text { color: #4a8acf; }
+#pill.scanning #pill-text { color: #cfcf4a; }
+
+/* ── Main layout ── */
+#controls {
+  display: flex; gap: 36px; align-items: flex-start;
+}
+
+/* ── D-pad ── */
+#dpad {
+  display: grid;
+  grid-template-columns: 64px 64px 64px;
+  grid-template-rows:    64px 64px 64px;
+  gap: 6px;
+}
+
+.btn {
+  background: #141414; border: 1px solid #242424; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem; cursor: pointer;
+  transition: background 80ms, border-color 80ms, transform 60ms;
+}
+.btn:hover  { background: #1c1c1c; border-color: #333; }
+.btn.active { background: #1a3a5a; border-color: #4a8acf;
+              box-shadow: 0 0 12px #4a8acf33; transform: scale(0.95); }
+.btn.stop-btn { grid-column: 2; grid-row: 2; font-size: 1rem; color: #555; }
+.btn.stop-btn.active { background: #3a1a1a; border-color: #cf4a4a; box-shadow: 0 0 12px #cf4a4a33; }
+
+/* ── Sensor panel ── */
+#sensor-panel {
+  display: flex; flex-direction: column; gap: 16px; min-width: 200px;
+}
+
+/* ── Distance display ── */
+#dist-wrap {
+  background: #111; border: 1px solid #1e1e1e; border-radius: 10px;
+  padding: 14px 18px; text-align: center;
+}
+#dist-label { font-size: 0.65rem; color: #444; text-transform: uppercase; letter-spacing: 0.15em; }
+#dist-value {
+  font-size: 2.2rem; color: #4acf6a; font-weight: bold;
+  margin: 6px 0 2px;
+  transition: color 300ms;
+}
+#dist-value.close { color: #cf4a4a; }
+#dist-value.mid   { color: #cfcf4a; }
+#dist-value.far   { color: #4acf6a; }
+#dist-unit { font-size: 0.7rem; color: #333; }
+#dist-bar {
+  margin-top: 8px; height: 4px; background: #1a1a1a; border-radius: 2px; overflow: hidden;
+}
+#dist-bar-fill {
+  height: 100%; background: #4acf6a; border-radius: 2px;
+  transition: width 200ms, background 200ms;
+}
+
+/* ── Servo control ── */
+#servo-wrap {
+  background: #111; border: 1px solid #1e1e1e; border-radius: 10px;
+  padding: 14px 18px;
+}
+#servo-label { font-size: 0.65rem; color: #444; text-transform: uppercase; letter-spacing: 0.15em; }
+#servo-val { color: #cf8a4a; font-size: 0.85rem; font-weight: bold; }
+#servo-slider {
+  -webkit-appearance: none; width: 100%; height: 4px;
+  background: #222; border-radius: 2px; outline: none; margin: 10px 0 6px;
+}
+#servo-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px;
+  border-radius: 50%; background: #cf8a4a; cursor: pointer;
+}
+#servo-btns { display: flex; gap: 6px; margin-top: 6px; }
+#servo-btns button {
+  flex: 1; padding: 6px 0; background: #1a1a1a; border: 1px solid #242424;
+  border-radius: 6px; color: #666; font-size: 0.7rem; cursor: pointer;
+  font-family: inherit;
+}
+#servo-btns button:hover { background: #222; border-color: #333; color: #999; }
+#servo-btns button:active { background: #2a1a0a; border-color: #cf8a4a; color: #cf8a4a; }
+
+/* ── Speed slider ── */
+#speed-wrap {
+  display: flex; align-items: center; gap: 14px;
+  font-size: 0.75rem; color: #444;
+}
+input[type=range] {
+  -webkit-appearance: none; width: 200px; height: 4px;
+  background: #222; border-radius: 2px; outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px;
+  border-radius: 50%; background: #4a8acf; cursor: pointer;
+}
+#spd-val { color: #6a9abf; min-width: 32px; text-align: right; }
+
+/* ── Car visualizer ── */
+#car-vis {
+  width: 100px; height: 140px; position: relative;
+}
+.wheel {
+  position: absolute; width: 18px; height: 32px;
+  background: #1e1e1e; border: 2px solid #2a2a2a; border-radius: 4px;
+  transition: background 80ms, border-color 80ms, box-shadow 80ms;
+}
+.wheel.spin {
+  background: #1a3a5a; border-color: #4a8acf;
+  box-shadow: 0 0 8px #4a8acf44;
+}
+.wheel-fl { top: 8px;  left: 4px; }
+.wheel-fr { top: 8px;  right: 4px; }
+.wheel-rl { bottom: 8px; left: 4px; }
+.wheel-rr { bottom: 8px; right: 4px; }
+.car-body {
+  position: absolute; top: 20px; left: 22px;
+  right: 22px; bottom: 20px;
+  background: #161616; border: 1px solid #2a2a2a; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+.car-arrow {
+  font-size: 1.6rem; opacity: 0.15; transition: opacity 150ms, transform 150ms;
+}
+
+/* ── Log ── */
+#log {
+  width: 500px; height: 80px;
+  background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 6px;
+  padding: 8px 12px; font-size: 0.68rem; color: #333;
+  overflow-y: auto; display: flex; flex-direction: column-reverse;
+}
+#log p { margin: 1px 0; }
+#log p.in  { color: #4a8acf; }
+#log p.out { color: #4acf7e; }
+#log p.sys { color: #444; }
+#log p.err { color: #cf4a4a; }
+
+/* ── Hints ── */
+#hints { font-size: 0.64rem; color: #222; text-align: center; line-height: 2; }
+.k { display: inline-block; background: #141414; border: 1px solid #222;
+     border-radius: 3px; padding: 0 5px; color: #333; }
+</style>
+</head>
+<body>
+
+<h1>Robot Car</h1>
+
+<div id="pill"><div class="dot"></div><span id="pill-text">connecting...</span></div>
+
+<div id="controls">
+  <!-- Left: D-pad + speed -->
+  <div style="display:flex; flex-direction:column; align-items:center; gap:16px;">
+    <div id="dpad">
+      <div></div>
+      <div class="btn" id="btn-fwd"  onmousedown="hold('F')" onmouseup="release()" ontouchstart="hold('F')" ontouchend="release()">&#9650;</div>
+      <div></div>
+      <div class="btn" id="btn-left" onmousedown="hold('L')" onmouseup="release()" ontouchstart="hold('L')" ontouchend="release()">&#9664;</div>
+      <div class="btn stop-btn" id="btn-stop" onclick="tap('S')">&#9632;</div>
+      <div class="btn" id="btn-right"onmousedown="hold('R')" onmouseup="release()" ontouchstart="hold('R')" ontouchend="release()">&#9654;</div>
+      <div></div>
+      <div class="btn" onclick="tap('S')" style="opacity:.35" title="No reverse">&#9660;</div>
+      <div></div>
+    </div>
+
+    <div id="speed-wrap">
+      <span>speed</span>
+      <input type="range" id="slider" min="80" max="255" value="200" oninput="updateSpeed(this.value)">
+      <span id="spd-val">200</span>
+    </div>
+
+    <div id="car-vis">
+      <div class="wheel wheel-fl" id="w-fl"></div>
+      <div class="wheel wheel-fr" id="w-fr"></div>
+      <div class="car-body"><div class="car-arrow" id="car-arrow">&#8593;</div></div>
+      <div class="wheel wheel-rl" id="w-rl"></div>
+      <div class="wheel wheel-rr" id="w-rr"></div>
+    </div>
+  </div>
+
+  <!-- Right: Sensors -->
+  <div id="sensor-panel">
+    <div id="dist-wrap">
+      <div id="dist-label">ultrasonic distance</div>
+      <div id="dist-value">--</div>
+      <div id="dist-unit">cm</div>
+      <div id="dist-bar"><div id="dist-bar-fill" style="width:0%"></div></div>
+    </div>
+
+    <div id="servo-wrap">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span id="servo-label">servo angle</span>
+        <span id="servo-val">90</span>
+      </div>
+      <input type="range" id="servo-slider" min="0" max="180" value="90" oninput="setServo(this.value)">
+      <div id="servo-btns">
+        <button onclick="setServo(0)">0</button>
+        <button onclick="setServo(45)">45</button>
+        <button onclick="setServo(90)">90</button>
+        <button onclick="setServo(135)">135</button>
+        <button onclick="setServo(180)">180</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="log"></div>
+
+<div id="hints">
+  <span class="k">W</span>/<span class="k">&#8593;</span> forward &nbsp;
+  <span class="k">A</span>/<span class="k">&#8592;</span> left &nbsp;
+  <span class="k">D</span>/<span class="k">&#8594;</span> right &nbsp;
+  <span class="k">Space</span> stop &nbsp;
+  <span class="k">+</span>/<span class="k">-</span> speed &nbsp;
+  <span class="k">Q</span>/<span class="k">E</span> servo
+</div>
+
+<script>
+let speed    = 200;
+let current  = null;
+let ws       = null;
+let wsRetry  = 0;
+let servoPos = 90;
+let distPoll = null;
+
+function connectWs() {
+  ws = new WebSocket('ws://localhost:8766');
+  ws.onopen  = () => {
+    wsRetry = 0;
+    log('daemon connected', 'sys');
+    startDistPoll();
+  };
+  ws.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type === 'status') setMode(m.mode, m.msg);
+    if (m.type === 'data') {
+      if (m.text.startsWith('DIST ')) {
+        updateDist(m.text);
+      } else if (!m.text.startsWith('READY')) {
+        log('← ' + m.text, 'in');
+      }
+    }
+  };
+  ws.onclose = () => {
+    ws = null; stopUI(); stopDistPoll();
+    const d = Math.min(1000 * Math.pow(1.5, wsRetry++), 8000);
+    setMode('none', 'offline — retry ' + (d/1000).toFixed(0) + 's');
+    setTimeout(connectWs, d);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function send(cmd) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
+}
+
+function driveCmd(dir) {
+  if (dir === 'S') return 'S';
+  return dir + speed;
+}
+
+function startDir(dir) {
+  current = dir;
+  const cmd = driveCmd(dir);
+  send(cmd);
+  log('→ ' + cmd, 'out');
+  updateBtns(dir);
+  updateVis(dir);
+}
+
+function stopDrive() {
+  current = null;
+  send('S');
+  updateBtns(null);
+  updateVis(null);
+}
+
+function hold(dir) { startDir(dir); }
+function release()  { stopDrive(); }
+function tap(cmd) {
+  send(cmd);
+  if (cmd === 'S') { current = null; updateBtns(null); updateVis(null); }
+  log('→ ' + cmd, 'out');
+}
+
+function updateSpeed(v) {
+  speed = parseInt(v);
+  document.getElementById('spd-val').textContent = speed;
+  send('V' + speed);
+  if (current) startDir(current);
+}
+
+function setServo(angle) {
+  servoPos = parseInt(angle);
+  document.getElementById('servo-slider').value = servoPos;
+  document.getElementById('servo-val').textContent = servoPos + '°';
+  send('A' + servoPos);
+}
+
+function updateDist(text) {
+  const cm = parseInt(text.split(' ')[1]);
+  const el = document.getElementById('dist-value');
+  const bar = document.getElementById('dist-bar-fill');
+  if (cm < 0) {
+    el.textContent = '--';
+    el.className = '';
+    bar.style.width = '0%';
+    return;
+  }
+  el.textContent = cm;
+  const pct = Math.min(cm / 300 * 100, 100);
+  bar.style.width = pct + '%';
+  if (cm < 15) {
+    el.className = 'close';
+    bar.style.background = '#cf4a4a';
+  } else if (cm < 50) {
+    el.className = 'mid';
+    bar.style.background = '#cfcf4a';
+  } else {
+    el.className = 'far';
+    bar.style.background = '#4acf6a';
+  }
+}
+
+function startDistPoll() {
+  stopDistPoll();
+  distPoll = setInterval(() => send('U'), 500);
+}
+function stopDistPoll() {
+  if (distPoll) { clearInterval(distPoll); distPoll = null; }
+}
+
+function stopUI() { stopDrive(); }
+
+function setMode(mode, msg) {
+  const pill = document.getElementById('pill');
+  pill.className = mode || '';
+  document.getElementById('pill-text').textContent = msg || mode || 'disconnected';
+}
+
+function updateBtns(active) {
+  const map = { F: 'btn-fwd', L: 'btn-left', R: 'btn-right' };
+  ['btn-fwd','btn-left','btn-right','btn-stop'].forEach(id => {
+    document.getElementById(id).classList.remove('active');
+  });
+  if (active && map[active]) document.getElementById(map[active]).classList.add('active');
+  if (!active) document.getElementById('btn-stop').classList.add('active');
+}
+
+function updateVis(dir) {
+  const fl = document.getElementById('w-fl');
+  const fr = document.getElementById('w-fr');
+  const rl = document.getElementById('w-rl');
+  const rr = document.getElementById('w-rr');
+  const arrow = document.getElementById('car-arrow');
+  [fl, fr, rl, rr].forEach(w => w.classList.remove('spin'));
+  arrow.style.opacity = '0.15';
+
+  if (dir === 'F') {
+    [fl, fr, rl, rr].forEach(w => w.classList.add('spin'));
+    arrow.style.opacity = '0.7'; arrow.textContent = '↑';
+  } else if (dir === 'L') {
+    fr.classList.add('spin'); rr.classList.add('spin');
+    arrow.style.opacity = '0.6'; arrow.textContent = '↺';
+  } else if (dir === 'R') {
+    fl.classList.add('spin'); rl.classList.add('spin');
+    arrow.style.opacity = '0.6'; arrow.textContent = '↻';
+  }
+}
+
+function log(text, cls) {
+  cls = cls || 'sys';
+  const el = document.getElementById('log');
+  const p = document.createElement('p');
+  p.className = cls; p.textContent = text;
+  el.prepend(p);
+  while (el.children.length > 80) el.removeChild(el.lastChild);
+}
+
+const KEY_DIR = {
+  'w': 'F', 'ArrowUp':    'F',
+  'a': 'L', 'ArrowLeft':  'L',
+  'd': 'R', 'ArrowRight': 'R',
+};
+
+document.addEventListener('keydown', e => {
+  if (e.repeat) return;
+  const k = e.key;
+  if (k === ' ' || k === 's' || k === 'ArrowDown') { e.preventDefault(); stopDrive(); return; }
+  if (k === '+' || k === '=') { const s = Math.min(speed + 20, 255); document.getElementById('slider').value = s; updateSpeed(s); return; }
+  if (k === '-') { const s = Math.max(speed - 20, 80);  document.getElementById('slider').value = s; updateSpeed(s); return; }
+  if (k === 'q') { setServo(Math.max(servoPos - 15, 0)); return; }
+  if (k === 'e') { setServo(Math.min(servoPos + 15, 180)); return; }
+  if (KEY_DIR[k]) { e.preventDefault(); startDir(KEY_DIR[k]); }
+});
+
+document.addEventListener('keyup', e => {
+  if (KEY_DIR[e.key] && current === KEY_DIR[e.key]) stopDrive();
+});
+
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopDrive(); });
+window.addEventListener('blur', stopDrive);
+
+connectWs();
+</script>
+</body>
+</html>
