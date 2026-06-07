@@ -64,14 +64,23 @@ if USE_EEG:
 
 # ── OpenAI ──
 from openai import OpenAI
-oai_client = OpenAI()
+oai_client = OpenAI()  # reads OPENAI_API_KEY from env
 
 
 # ═════════════════════════════════════════════════════════════
 # WEAVE INIT
 # ═════════════════════════════════════════════════════════════
 
-weave.init("axiom-bci")
+try:
+    weave.init("axiom-bci")
+    HAS_WEAVE = True
+    print("[WEAVE] Connected", flush=True)
+except Exception as e:
+    HAS_WEAVE = False
+    print(f"[WEAVE] Not available ({e}), continuing without tracing", flush=True)
+    # Make weave.op a no-op decorator
+    _real_weave_op = weave.op
+    weave.op = lambda f=None, **kw: f if f else (lambda fn: fn)
 
 
 # ═════════════════════════════════════════════════════════════
