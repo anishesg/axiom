@@ -1,0 +1,21 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+dist/
+*.egg-info/
+.env
+*.npz
+*.log
+*.task
+
+# Browser profile
+data/chrome_profile/
+
+# IDE
+.vscode/
+.idea/
+
+# Frontend build
+frontend/dist/

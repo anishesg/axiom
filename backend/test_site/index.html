@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Axiom Gaze Test</title>
+<script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #060614;
+    color: #c8d0e8;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Calibration Phase ── */
+  #calScreen {
+    position: fixed; inset: 0; z-index: 100;
+    background: #060614;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  #calScreen.done { display: none; }
+  #calScreen h2 { font-size: 20px; letter-spacing: 3px; margin-bottom: 8px; }
+  #calScreen p { font-size: 13px; color: #5a6894; margin-bottom: 30px; text-align: center; max-width: 480px; line-height: 1.6; }
+
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    width: 90vw; height: 70vh;
+  }
+  .cal-point {
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .cal-dot {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #1a1a3e; border: 2px solid #5a6894;
+    transition: all 0.2s; position: relative;
+  }
+  .cal-dot:hover { border-color: #00d4ff; }
+  .cal-dot.clicked1 { background: #00d4ff40; border-color: #00d4ff; }
+  .cal-dot.clicked2 { background: #00d4ff80; border-color: #00d4ff; }
+  .cal-dot.clicked3 { background: #00d4ff; border-color: #fff; }
+  .cal-dot.clicked3::after {
+    content: '✓'; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #000; font-size: 14px; font-weight: bold;
+  }
+
+  #calInfo {
+    margin-top: 20px; font-size: 12px; color: #5a6894;
+  }
+  #startBtn {
+    margin-top: 16px; padding: 12px 36px;
+    background: #00ff88; color: #000; border: none; border-radius: 8px;
+    font-family: inherit; font-size: 14px; font-weight: 700;
+    letter-spacing: 1px; cursor: pointer; display: none;
+  }
+  #startBtn:hover { box-shadow: 0 0 20px #00ff8840; }
+
+  /* ── Test Phase ── */
+  #testScreen { display: none; height: 100vh; flex-direction: column; }
+  #testScreen.active { display: flex; }
+
+  .header {
+    padding: 12px 24px; border-bottom: 1px solid #1a1a3e;
+    background: #0d0d24; display: flex; justify-content: space-between; align-items: center;
+  }
+  .header h1 { font-size: 15px; letter-spacing: 3px; }
+  .header h1 span { color: #00d4ff; font-weight: 400; }
+  .status { font-size: 11px; color: #5a6894; display: flex; align-items: center; gap: 10px; }
+  #coords { min-width: 100px; }
+
+  .grid-container { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 840px; width: 100%; }
+
+  .box {
+    aspect-ratio: 16/10; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; font-weight: 700; letter-spacing: 2px;
+    border: 2px solid transparent; transition: all 0.15s ease;
+  }
+  .box:nth-child(1) { background: #1a1a3e; }
+  .box:nth-child(2) { background: #1e0a2e; }
+  .box:nth-child(3) { background: #0a1e2e; }
+  .box:nth-child(4) { background: #2e1a0a; }
+  .box:nth-child(5) { background: #0a2e1a; }
+  .box:nth-child(6) { background: #2e0a1a; }
+
+  .box.gazed {
+    transform: scale(1.05);
+    box-shadow: 0 0 40px rgba(255,255,255,0.12);
+  }
+  .box:nth-child(1).gazed { border-color: #6c63ff; box-shadow: 0 0 40px #6c63ff30; }
+  .box:nth-child(2).gazed { border-color: #a855f7; box-shadow: 0 0 40px #a855f730; }
+  .box:nth-child(3).gazed { border-color: #00d4ff; box-shadow: 0 0 40px #00d4ff30; }
+  .box:nth-child(4).gazed { border-color: #ffaa00; box-shadow: 0 0 40px #ffaa0030; }
+  .box:nth-child(5).gazed { border-color: #00ff88; box-shadow: 0 0 40px #00ff8830; }
+  .box:nth-child(6).gazed { border-color: #ff6b9d; box-shadow: 0 0 40px #ff6b9d30; }
+
+  .box .box-label { opacity: 0.6; transition: opacity 0.15s; }
+  .box.gazed .box-label { opacity: 1; }
+  .box .gaze-tag {
+    position: absolute; bottom: 8px; font-size: 9px;
+    letter-spacing: 2px; color: #fff; opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .box.gazed .gaze-tag { opacity: 0.7; }
+  .box { position: relative; }
+
+  .footer {
+    padding: 10px 24px; border-top: 1px solid #1a1a3e;
+    background: #0d0d24; display: flex; justify-content: space-between;
+    align-items: center; font-size: 12px; color: #5a6894;
+  }
+  .footer button {
+    padding: 5px 14px; background: #1a1a3e; color: #c8d0e8;
+    border: none; border-radius: 4px; font-family: inherit;
+    font-size: 11px; cursor: pointer;
+  }
+  .footer button:hover { background: #2a2a4e; }
+
+  #webgazerVideoContainer { display: none !important; }
+  #webgazerVideoFeed { display: none !important; }
+  #webgazerFaceFeedbackBox { display: none !important; }
+  #webgazerFaceOverlay { display: none !important; }
+  #webgazerGazeDot {
+    background: #00d4ff !important; box-shadow: 0 0 10px #00d4ff80 !important;
+    width: 10px !important; height: 10px !important;
+    border: 2px solid #fff !important; opacity: 0.7 !important;
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ CALIBRATION ═══ -->
+<div id="calScreen">
+  <h2>GAZE CALIBRATION</h2>
+  <p>Click each dot 3 times while <strong>staring directly at it</strong>. Each click trains the eye tracker. Do all 9 dots.</p>
+  <div class="cal-grid" id="calGrid"></div>
+  <div id="calInfo">0 / 9 points completed</div>
+  <button id="startBtn" onclick="finishCal()">START TRACKING</button>
+</div>
+
+<!-- ═══ TEST ═══ -->
+<div id="testScreen">
+  <div class="header">
+    <h1>AXIOM <span>gaze test</span></h1>
+    <div class="status">
+      <span id="coords">--</span>
+      <span id="lookingAt">--</span>
+    </div>
+  </div>
+  <div class="grid-container">
+    <div class="grid">
+      <div class="box" data-id="1"><span class="box-label">BOX 1</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="2"><span class="box-label">BOX 2</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="3"><span class="box-label">BOX 3</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="4"><span class="box-label">BOX 4</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="5"><span class="box-label">BOX 5</span><span class="gaze-tag">LOOKING HERE</span></div>
+      <div class="box" data-id="6"><span class="box-label">BOX 6</span><span class="gaze-tag">LOOKING HERE</span></div>
+    </div>
+  </div>
+  <div class="footer">
+    <span id="footerStatus">Tracking active</span>
+    <button onclick="location.reload()">Recalibrate</button>
+  </div>
+</div>
+
+<script>
+// ── Calibration ──
+const calDots = [];
+let completedPoints = 0;
+
+function buildCalGrid() {
+  const grid = document.getElementById('calGrid');
+  for (let i = 0; i < 9; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cal-point';
+    const dot = document.createElement('div');
+    dot.className = 'cal-dot';
+    dot.dataset.clicks = '0';
+    dot.dataset.idx = i;
+    dot.addEventListener('click', function(e) {
+      e.stopPropagation();
+      let clicks = parseInt(this.dataset.clicks) + 1;
+      this.dataset.clicks = clicks;
+      if (clicks === 1) this.className = 'cal-dot clicked1';
+      if (clicks === 2) this.className = 'cal-dot clicked2';
+      if (clicks >= 3) {
+        this.className = 'cal-dot clicked3';
+        this.style.pointerEvents = 'none';
+        completedPoints++;
+        document.getElementById('calInfo').textContent =
+          completedPoints + ' / 9 points completed';
+        if (completedPoints >= 9) {
+          document.getElementById('startBtn').style.display = 'block';
+          document.getElementById('calInfo').textContent = 'All points done — click below to start';
+        }
+      }
+    });
+    cell.appendChild(dot);
+    grid.appendChild(cell);
+  }
+}
+
+function finishCal() {
+  document.getElementById('calScreen').classList.add('done');
+  document.getElementById('testScreen').classList.add('active');
+  // Show the gaze dot
+  const gazeDot = document.getElementById('webgazerGazeDot');
+  if (gazeDot) gazeDot.style.display = 'block';
+}
+
+// ── WebGazer ──
+webgazer
+  .setRegression('ridge')
+  .saveDataAcrossSessions(false)
+  .setGazeListener(function(data, timestamp) {
+    if (!data) return;
+    const x = data.x, y = data.y;
+    if (isNaN(x) || isNaN(y)) return;
+
+    document.getElementById('coords').textContent =
+      Math.round(x) + ', ' + Math.round(y);
+
+    // Only do box highlighting when test screen is visible
+    if (!document.getElementById('testScreen').classList.contains('active')) return;
+
+    const boxes = document.querySelectorAll('.box');
+    let hit = null;
+    boxes.forEach(box => {
+      const r = box.getBoundingClientRect();
+      const pad = 30; // forgiving hit area
+      if (x >= r.left - pad && x <= r.right + pad &&
+          y >= r.top - pad && y <= r.bottom + pad) {
+        hit = box;
+        box.classList.add('gazed');
+      } else {
+        box.classList.remove('gazed');
+      }
+    });
+
+    document.getElementById('lookingAt').textContent =
+      hit ? 'Looking at: BOX ' + hit.dataset.id : '--';
+    document.getElementById('footerStatus').textContent =
+      hit ? 'Gaze on BOX ' + hit.dataset.id : 'Tracking active';
+  })
+  .begin()
+  .then(() => {
+    // Hide all video elements
+    webgazer.showVideoPreview(false);
+    try { webgazer.showFaceOverlay(false); } catch(e) {}
+    try { webgazer.showFaceFeedbackBox(false); } catch(e) {}
+    // Also force-hide via DOM
+    ['webgazerVideoContainer','webgazerVideoFeed','webgazerFaceFeedbackBox','webgazerFaceOverlay'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    // Hide gaze dot during calibration
+    const gd = document.getElementById('webgazerGazeDot');
+    if (gd) gd.style.display = 'none';
+  });
+
+buildCalGrid();
+</script>
+</body>
+</html>
