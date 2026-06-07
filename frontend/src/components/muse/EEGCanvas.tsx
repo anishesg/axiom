@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback } from "react";
-import type { EEGFrame } from "../hooks/useMuseStream";
+import type { EEGFrame } from "../../hooks/useMuseStream";
 
 const COLORS = ["#4d8ef7", "#f74d6a", "#00e68a", "#a855f7"];
 const NAMES = ["TP9", "AF7", "AF8", "TP10"];

@@ -1,0 +1,51 @@
+[project]
+name = "eleven"
+version = "0.1.0"
+description = "EEG-based communication platform for accessibility"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "brainflow>=5.12.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "websockets>=12.0",
+    "pydantic>=2.5.0",
+    "scikit-learn>=1.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.0.0",
+    "ruff>=0.1.0",
+]
+viz = [
+    "pyqtgraph>=0.13.0",
+    "PyQt6>=6.6.0",
+]
+full = [
+    "mne>=1.6.0",
+    "asrpy>=0.0.3",
+    "torch>=2.1.0",
+]
+
+[project.scripts]
+eleven = "eleven.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W"]

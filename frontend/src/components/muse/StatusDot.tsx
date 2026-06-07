@@ -1,4 +1,4 @@
-import type { ConnectionStatus } from "../hooks/useMuseStream";
+import type { ConnectionStatus } from "../../hooks/useMuseStream";
 
 interface Props {
   status: ConnectionStatus;
