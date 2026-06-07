@@ -31,16 +31,26 @@
   .cal-header p { font-size:13px; color:var(--dim); margin-top:6px; }
   .cal-area { flex:1; position:relative; }
   .cal-dot {
-    position:absolute; width:28px; height:28px; border-radius:50%;
-    background:#1a1a2e; border:2px solid #5a6894;
+    position:absolute; width:36px; height:36px; border-radius:50%;
+    background:#00ff88; border:3px solid #00ff88;
     transform:translate(-50%,-50%); cursor:pointer;
-    transition:all 0.2s; z-index:10;
+    transition:all 0.3s; z-index:10;
+    box-shadow:0 0 20px rgba(0,255,136,0.4), 0 0 60px rgba(0,255,136,0.15);
+    animation:calPulse 1.5s ease-in-out infinite;
+    display:none;
   }
-  .cal-dot:hover { border-color:#00d4ff; background:#00d4ff30; transform:translate(-50%,-50%) scale(1.2); }
-  .cal-dot.done { background:#00ff88; border-color:#00ff88; opacity:0.5; pointer-events:none; }
+  .cal-dot.active { display:block; }
+  .cal-dot:hover { transform:translate(-50%,-50%) scale(1.3); box-shadow:0 0 30px rgba(0,255,136,0.6); }
+  .cal-dot.done { background:#00ff88; border-color:#00ff88; opacity:0.3;
+                  display:block; pointer-events:none; width:12px; height:12px;
+                  box-shadow:none; animation:none; }
+  @keyframes calPulse {
+    0%,100% { box-shadow:0 0 20px rgba(0,255,136,0.4), 0 0 60px rgba(0,255,136,0.15); }
+    50% { box-shadow:0 0 35px rgba(0,255,136,0.7), 0 0 80px rgba(0,255,136,0.25); transform:translate(-50%,-50%) scale(1.1); }
+  }
   .cal-dot .cal-label {
-    position:absolute; top:32px; left:50%; transform:translateX(-50%);
-    font-size:9px; color:#4a4a6a; white-space:nowrap;
+    position:absolute; top:42px; left:50%; transform:translateX(-50%);
+    font-size:10px; color:#00ff88; white-space:nowrap; font-weight:600;
   }
   #calStatus { text-align:center; padding:12px; font-size:12px; color:var(--dim); }
   #calDone { display:none; margin:0 auto; padding:12px 36px; background:#00ff88;
@@ -83,20 +93,23 @@
   .player-title { font-size:36px; font-weight:800; margin-bottom:10px; }
   .player-meta { font-size:14px; color:var(--dim); margin-bottom:16px; }
   .player-desc { font-size:13px; color:#7a7a9a; max-width:500px; line-height:1.6; }
-  .player-controls { padding:0; background:var(--surface);
-                     display:flex; align-items:stretch; gap:0;
-                     border-top:2px solid var(--border); min-height:100px;
-                     margin-bottom:70px; /* space for the fixed bottom bars */ }
-  .ctrl-btn { padding:0 60px; border-radius:0; border:none; font-family:'Inter';
-              font-size:20px; font-weight:800; cursor:pointer; transition:all 0.25s;
-              display:flex; align-items:center; justify-content:center;
-              letter-spacing:2px; min-width:250px; border-right:1px solid var(--border); }
-  .ctrl-btn:last-of-type { border-right:none; }
-  .ctrl-btn.primary { background:var(--accent); color:white; }
-  .ctrl-btn.primary:hover { background:#ff1a25; }
-  .ctrl-btn.secondary { background:var(--surface); color:var(--text); }
-  .ctrl-btn.pinned { background:rgba(255,255,255,0.08); box-shadow:inset 0 0 30px rgba(255,255,255,0.05); }
-  .ctrl-btn.locked { background:rgba(229,9,20,0.2); box-shadow:inset 0 0 40px rgba(229,9,20,0.15); }
+  .player-controls { position:absolute; top:50%; left:0; right:0;
+                     transform:translateY(-50%);
+                     display:flex; align-items:center; justify-content:center;
+                     gap:80px; padding:0 60px; pointer-events:none; z-index:5; }
+  .ctrl-btn { padding:28px 60px; border-radius:16px; border:2px solid rgba(255,255,255,0.15);
+              font-family:'Inter'; font-size:22px; font-weight:800; cursor:pointer;
+              transition:all 0.3s; display:flex; align-items:center; justify-content:center;
+              letter-spacing:2px; min-width:240px; pointer-events:all;
+              backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); }
+  .ctrl-btn.primary { background:rgba(229,9,20,0.85); color:white; border-color:rgba(229,9,20,0.5); }
+  .ctrl-btn.primary:hover { background:rgba(229,9,20,1); }
+  .ctrl-btn.secondary { background:rgba(30,30,50,0.8); color:var(--text); border-color:rgba(255,255,255,0.1); }
+  .ctrl-btn.secondary:hover { background:rgba(50,50,70,0.8); }
+  .ctrl-btn.pinned { transform:scale(1.06); border-color:rgba(255,255,255,0.4);
+                     box-shadow:0 0 30px rgba(255,255,255,0.1); }
+  .ctrl-btn.locked { transform:scale(1.1); border-color:var(--accent);
+                     box-shadow:0 0 50px rgba(229,9,20,0.3); }
 
   /* ── Bottom ── */
   .bottom { position:fixed; bottom:0; left:0; right:0; z-index:50; }
@@ -148,11 +161,14 @@
 <div id="calScreen">
   <div class="cal-header">
     <h2>GAZE CALIBRATION</h2>
-    <p>Stare at each dot for 1 second, THEN click it. They're placed at the card positions.</p>
+    <p>A green dot will appear. Stare at it for a moment, then click. One dot at a time.</p>
   </div>
   <div class="cal-area" id="calArea"></div>
-  <div id="calStatus">0 points collected</div>
-  <button id="calDone" onclick="finishCal()">START WATCHING</button>
+  <div id="calStatus">Loading calibration points...</div>
+  <div style="display:flex;gap:16px;justify-content:center;padding-bottom:16px">
+    <button id="calDone" onclick="finishCal()" style="display:none;padding:14px 40px;background:#00ff88;color:#000;border:none;border-radius:10px;font-family:Inter;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:1px">START WATCHING</button>
+    <button id="calAgain" onclick="doAnotherRound()" style="display:none;padding:14px 30px;background:var(--border);color:var(--text);border:none;border-radius:10px;font-family:Inter;font-size:14px;font-weight:600;cursor:pointer">+ Another Round</button>
+  </div>
 </div>
 
 <div class="header">
@@ -179,10 +195,9 @@
   <div class="player-controls" id="playerControls">
     <div class="ctrl-btn primary" id="btnPlay" data-action="play">▶  PLAY</div>
     <div class="ctrl-btn secondary" id="btnBack" data-action="back">←  BACK</div>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:14px;padding:0 20px">
-      <span style="font-size:11px;color:var(--dim)" id="playerEng">--</span>
-      <span style="font-size:11px;color:var(--dim)" id="playerStatus">Look at a button. Focus to select.</span>
-    </div>
+  </div>
+  <div style="position:absolute;bottom:80px;left:0;right:0;text-align:center;z-index:6">
+    <span style="font-size:12px;color:#5a5a7a;background:rgba(10,10,15,0.7);padding:6px 16px;border-radius:6px" id="playerStatus">Look at PLAY or BACK. Focus to select.</span>
   </div>
 </div>
 
@@ -242,17 +257,44 @@ MOVIES.forEach(m => {
   grid.appendChild(card);
 });
 
-// ── Calibration dots — placed at card centers + corners ──
+// ── Calibration — sequential dots, one at a time ──
+let calDots = [];
+let calIdx = 0;
+
 function buildCalDots() {
   const area = document.getElementById('calArea');
-  const dots = [];
 
-  // 4 corners + center
-  [[5,5],[95,5],[5,90],[95,90],[50,50]].forEach(([xp,yp], i) => {
-    dots.push({ x: xp + '%', y: yp + '%', label: ['TL','TR','BL','BR','C'][i] });
+  // Build all calibration positions: corners, edges, center, then card centers
+  const positions = [];
+
+  // 5 coverage points (corners + center)
+  positions.push({ xp:'50%', yp:'50%', label:'Center' });
+  positions.push({ xp:'8%',  yp:'8%',  label:'Top Left' });
+  positions.push({ xp:'92%', yp:'8%',  label:'Top Right' });
+  positions.push({ xp:'8%',  yp:'85%', label:'Bottom Left' });
+  positions.push({ xp:'92%', yp:'85%', label:'Bottom Right' });
+
+  // Edge midpoints
+  positions.push({ xp:'50%', yp:'8%',  label:'Top' });
+  positions.push({ xp:'8%',  yp:'50%', label:'Left' });
+  positions.push({ xp:'92%', yp:'50%', label:'Right' });
+  positions.push({ xp:'50%', yp:'85%', label:'Bottom' });
+
+  // Create dot elements (all hidden initially)
+  positions.forEach((pos, i) => {
+    const d = document.createElement('div');
+    d.className = 'cal-dot';
+    d.style.left = pos.xp; d.style.top = pos.yp;
+    d.innerHTML = `<span class="cal-label">${pos.label}</span>`;
+    d.onclick = function() {
+      const r = this.getBoundingClientRect();
+      calClick(this, r.left + r.width/2, r.top + r.height/2);
+    };
+    area.appendChild(d);
+    calDots.push(d);
   });
 
-  // Card centers — after the grid has rendered
+  // Card center dots (added after grid renders)
   setTimeout(() => {
     document.querySelectorAll('.card').forEach((card, i) => {
       const r = card.getBoundingClientRect();
@@ -264,38 +306,56 @@ function buildCalDots() {
       d.innerHTML = `<span class="cal-label">${MOVIES[i].title}</span>`;
       d.onclick = () => calClick(d, cx, cy);
       area.appendChild(d);
+      calDots.push(d);
     });
-  }, 300);
 
-  // Corner dots (percentage-based)
-  dots.forEach(({x, y, label}) => {
-    const d = document.createElement('div');
-    d.className = 'cal-dot';
-    d.style.left = x; d.style.top = y;
-    d.innerHTML = `<span class="cal-label">${label}</span>`;
-    d.onclick = function() {
-      const r = this.getBoundingClientRect();
-      calClick(this, r.left + r.width/2, r.top + r.height/2);
-    };
-    area.appendChild(d);
-  });
+    // Show first dot
+    showNextCalDot();
+  }, 500);
+}
+
+function showNextCalDot() {
+  if (calIdx < calDots.length) {
+    calDots[calIdx].classList.add('active');
+    document.getElementById('calStatus').textContent =
+      `Point ${calIdx + 1}/${calDots.length} — stare at the green dot, then click it`;
+  }
 }
 
 function calClick(dot, viewX, viewY) {
-  // Convert viewport to screen coordinates
   const screenX = viewX + window.screenX;
   const screenY = viewY + window.screenY + (window.outerHeight - window.innerHeight);
 
+  dot.classList.remove('active');
   dot.classList.add('done');
 
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'cal_point', screen_x: screenX, screen_y: screenY }));
   }
+
   calCount++;
-  document.getElementById('calStatus').textContent = calCount + ' points collected';
-  if (calCount >= 9) {
+  calIdx++;
+
+  if (calIdx >= calDots.length) {
+    // All dots done — offer to start or do another round
+    document.getElementById('calStatus').textContent =
+      `${calCount} points collected! Click START or do another round.`;
     document.getElementById('calDone').style.display = 'block';
+
+    // Option: reset and do another round for more accuracy
+    document.getElementById('calAgain').style.display = 'inline-block';
+  } else {
+    // Show next dot after a brief pause
+    setTimeout(showNextCalDot, 400);
   }
+}
+
+function doAnotherRound() {
+  calIdx = 0;
+  calDots.forEach(d => { d.classList.remove('done','active'); });
+  document.getElementById('calDone').style.display = 'none';
+  document.getElementById('calAgain').style.display = 'none';
+  showNextCalDot();
 }
 
 function finishCal() {
