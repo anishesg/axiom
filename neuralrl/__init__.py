@@ -23,5 +23,11 @@ from neuralrl.brain_reward import BrainReward
 from neuralrl.cts import CTS
 from neuralrl.fingerprint import NeuralFingerprint
 from neuralrl.adaptation import AdaptationTracker
+from neuralrl.brain_stream import BrainPublisher, BrainSubscriber
+from neuralrl.structured_rl import BrainInterpreter, BrainInterpretation, StyleUpdate
 
-__all__ = ["BrainReward", "CTS", "NeuralFingerprint", "AdaptationTracker"]
+__all__ = [
+    "BrainReward", "CTS", "NeuralFingerprint", "AdaptationTracker",
+    "BrainPublisher", "BrainSubscriber",
+    "BrainInterpreter", "BrainInterpretation", "StyleUpdate",
+]
