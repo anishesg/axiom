@@ -269,9 +269,11 @@ ws_clients = set()
 # ═════════════════════════════════════════════════════════════
 
 def perception_loop(cam_idx, gaze_estimator, eeg):
-    filter_x = OneEuroFilter(min_cutoff=0.8, beta=0.008)
-    filter_y = OneEuroFilter(min_cutoff=0.8, beta=0.008)
+    # Heavier smoothing — raw signal is very noisy (300px std)
+    filter_x = OneEuroFilter(min_cutoff=0.4, beta=0.005)
+    filter_y = OneEuroFilter(min_cutoff=0.4, beta=0.005)
     eng_history = deque(maxlen=15)
+    recent_features = deque(maxlen=30)  # ~1 second of features for averaging
     tick = 0
 
     cap = cv2.VideoCapture(cam_idx)
@@ -285,11 +287,17 @@ def perception_loop(cam_idx, gaze_estimator, eeg):
         if ret:
             features, blink = gaze_estimator.extract_features(frame)
             if features is not None and not blink:
-                # Store latest features for calibration
+                recent_features.append(features.copy())
                 state["_latest_features"] = features
+                state["_recent_features"] = list(recent_features)
 
                 if state["calibrated"]:
-                    raw = gaze_estimator.predict(np.array([features]))[0]
+                    # Average last 5 frames before predicting for stability
+                    if len(recent_features) >= 5:
+                        avg_feat = np.mean(list(recent_features)[-5:], axis=0)
+                        raw = gaze_estimator.predict(np.array([avg_feat]))[0]
+                    else:
+                        raw = gaze_estimator.predict(np.array([features]))[0]
                     t = time.time()
                     state["gaze_x"] = int(filter_x(raw[0], t))
                     state["gaze_y"] = int(filter_y(raw[1], t))
@@ -345,54 +353,53 @@ async def ws_handler(websocket):
             data = json.loads(msg)
 
             if data["type"] == "cursor_train":
-                # Continuous training: cursor position = ground truth for where eyes are
+                # Continuous training: cursor position = ground truth
                 screen_x = data["screen_x"]
                 screen_y = data["screen_y"]
-                features = state.get("_latest_features")
-                if features is not None and state["calibrated"]:
-                    state["cal_features"].append(features.copy())
+                # Collect 10 frames and average for this point
+                frames_collected = []
+                for stored in state.get("_recent_features", []):
+                    frames_collected.append(stored)
+                if frames_collected:
+                    avg_feat = np.mean(frames_collected[-10:], axis=0)
+                    state["cal_features"].append(avg_feat)
                     state["cal_targets"].append([screen_x, screen_y])
-                    # Retrain every 20 new points
-                    if len(state["cal_features"]) % 20 == 0:
+                    # Retrain every 15 new points
+                    if len(state["cal_features"]) % 15 == 0:
                         X = np.array(state["cal_features"])
                         y = np.array(state["cal_targets"])
                         state["_gaze_estimator"].train(X, y)
-                        print(f"[CAL] Retrained on {len(state['cal_features'])} total points", flush=True)
+                        print(f"[CAL] Retrained on {len(state['cal_features'])} points", flush=True)
 
             elif data["type"] == "cal_point":
-                # Browser user clicked a calibration dot at these SCREEN coordinates
+                # Browser user clicked a calibration dot
                 screen_x = data["screen_x"]
                 screen_y = data["screen_y"]
-                features = state.get("_latest_features")
 
-                if features is not None:
-                    # Collect multiple frames for this point
-                    state["cal_features"].append(features.copy())
+                # Average the last 15 feature frames for stability
+                recent = state.get("_recent_features", [])
+                if len(recent) >= 5:
+                    avg_feat = np.mean(recent[-15:], axis=0)
+                    state["cal_features"].append(avg_feat)
                     state["cal_targets"].append([screen_x, screen_y])
                     n = len(state["cal_features"])
-                    print(f"[CAL] Point {n}: ({screen_x}, {screen_y})", flush=True)
-
-                    await websocket.send(json.dumps({
-                        "type": "cal_ack", "count": n,
-                    }))
+                    print(f"[CAL] Point {n}: ({screen_x:.0f}, {screen_y:.0f})", flush=True)
+                    await websocket.send(json.dumps({"type": "cal_ack", "count": n}))
+                else:
+                    print("[CAL] Not enough features yet, look at the dot longer", flush=True)
+                    await websocket.send(json.dumps({"type": "cal_ack", "count": len(state["cal_features"])}))
 
             elif data["type"] == "cal_done":
-                # Train the gaze model
                 n = len(state["cal_features"])
                 if n >= 5:
                     X = np.array(state["cal_features"])
                     y = np.array(state["cal_targets"])
                     state["_gaze_estimator"].train(X, y)
                     state["calibrated"] = True
-                    print(f"[CAL] Trained on {n} points. Gaze active!", flush=True)
-
-                    await websocket.send(json.dumps({
-                        "type": "cal_complete", "n_points": n,
-                    }))
+                    print(f"[CAL] Trained on {n} averaged points. Gaze active!", flush=True)
+                    await websocket.send(json.dumps({"type": "cal_complete", "n_points": n}))
                 else:
-                    await websocket.send(json.dumps({
-                        "type": "cal_error", "msg": f"Need at least 5 points, got {n}",
-                    }))
+                    await websocket.send(json.dumps({"type": "cal_error", "msg": f"Need 5+ points, got {n}"}))
 
             elif data["type"] == "register_elements":
                 win_x = data.get("window_x", 0)
@@ -479,8 +486,9 @@ async def main():
             break
     print(f"Camera: {cam_idx}")
 
-    # Gaze estimator (NO calibration here — browser does it)
-    gaze = GazeEstimator(model_name="tiny_mlp")
+    # Ridge regression — linear model doesn't amplify the tiny feature noise
+    # that tiny_mlp magnifies into 300px prediction swings
+    gaze = GazeEstimator(model_name="ridge")
     state["_gaze_estimator"] = gaze
 
     # EEG
