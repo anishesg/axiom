@@ -35,6 +35,7 @@ from enum import Enum
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 import numpy as np
+import redis
 import weave
 import websockets
 
@@ -71,6 +72,140 @@ oai_client = OpenAI()
 # ═════════════════════════════════════════════════════════════
 
 weave.init("axiom-bci")
+
+
+# ═════════════════════════════════════════════════════════════
+# REDIS — real-time nervous system
+# ═════════════════════════════════════════════════════════════
+
+try:
+    rdb = redis.Redis(host="127.0.0.1", port=6379, decode_responses=True)
+    rdb.ping()
+    HAS_REDIS = True
+    print("[REDIS] Connected", flush=True)
+except Exception:
+    rdb = None
+    HAS_REDIS = False
+    print("[REDIS] Not available, continuing without", flush=True)
+
+SESSION_ID = f"session:{int(time.time())}"
+
+
+class RedisBrainBus:
+    """Streams brain state to Redis for multi-agent consumption.
+    Tracks rolling engagement baseline for drift detection."""
+
+    def __init__(self):
+        if not HAS_REDIS:
+            return
+        # Stream for real-time brain state fan-out
+        self.stream_key = f"stream:brain:{SESSION_ID}"
+        # Rolling engagement baseline (5-minute buckets)
+        self.baseline_key = f"baseline:engagement:{SESSION_ID}"
+        self.baseline_values = []
+        self.baseline_window = 300  # 5 minutes
+        self.last_baseline_update = time.time()
+        # Session memory
+        self.session_key = f"session:memory:{SESSION_ID}"
+        rdb.hset(self.session_key, mapping={
+            "start_time": str(time.time()),
+            "action_count": "0",
+            "selections": "[]",
+            "initial_threshold": "0.75",
+        })
+        rdb.expire(self.session_key, 7200)
+
+    def publish_brain_state(self, brain_state, gaze_x, gaze_y, engagement):
+        if not HAS_REDIS:
+            return
+        try:
+            rdb.xadd(self.stream_key, {
+                "ts": str(int(time.time() * 1000)),
+                "engagement": f"{engagement:.3f}",
+                "focus": f"{brain_state['focus']:.3f}",
+                "theta_beta": f"{brain_state['theta_beta']:.3f}",
+                "alpha": f"{brain_state['alpha']:.3f}",
+                "beta": f"{brain_state['beta']:.3f}",
+                "gaze_x": str(gaze_x),
+                "gaze_y": str(gaze_y),
+            }, maxlen=6000, approximate=True)  # ~5 min at 20Hz
+
+            # Track rolling baseline for drift detection
+            self.baseline_values.append(engagement)
+            now = time.time()
+            if now - self.last_baseline_update > 30:  # every 30s
+                self._update_baseline()
+                self.last_baseline_update = now
+
+        except Exception:
+            pass
+
+    def _update_baseline(self):
+        if not self.baseline_values:
+            return
+        mean = float(np.mean(self.baseline_values[-600:]))  # last 30s worth
+        std = float(np.std(self.baseline_values[-600:]))
+        try:
+            rdb.hset(self.baseline_key, mapping={
+                "mean": f"{mean:.4f}",
+                "std": f"{std:.4f}",
+                "n_samples": str(len(self.baseline_values)),
+                "updated_at": str(time.time()),
+            })
+            rdb.expire(self.baseline_key, 7200)
+        except Exception:
+            pass
+
+    def detect_drift(self, current_engagement):
+        """Check if current engagement has drifted from baseline."""
+        if not HAS_REDIS:
+            return None
+        try:
+            baseline = rdb.hgetall(self.baseline_key)
+            if not baseline or "mean" not in baseline:
+                return None
+            b_mean = float(baseline["mean"])
+            b_std = float(baseline["std"])
+            if b_std < 0.01:
+                return None
+            z_score = (current_engagement - b_mean) / b_std
+            if abs(z_score) > 2.0:
+                return {"drift": True, "z_score": z_score, "baseline_mean": b_mean,
+                        "current": current_engagement, "direction": "up" if z_score > 0 else "down"}
+            return None
+        except Exception:
+            return None
+
+    def record_selection(self, element_id, engagement, brain_persona, reward):
+        if not HAS_REDIS:
+            return
+        try:
+            rdb.hincrby(self.session_key, "action_count", 1)
+            # Append to selection history
+            history = json.loads(rdb.hget(self.session_key, "selections") or "[]")
+            history.append({
+                "element": element_id,
+                "engagement": round(engagement, 3),
+                "persona": brain_persona,
+                "reward": round(reward, 3),
+                "time": time.time(),
+            })
+            # Keep last 100
+            rdb.hset(self.session_key, "selections", json.dumps(history[-100:]))
+        except Exception:
+            pass
+
+    def get_session_summary(self):
+        if not HAS_REDIS:
+            return {}
+        try:
+            data = rdb.hgetall(self.session_key)
+            return data
+        except Exception:
+            return {}
+
+
+brain_bus = RedisBrainBus()
 
 
 # ═════════════════════════════════════════════════════════════
@@ -547,6 +682,18 @@ def perception_loop(cam_idx, gaze_estimator, eeg):
             persona_name, _ = get_brain_persona(brain)
             shared_state["brain_persona"] = persona_name
 
+            # Publish to Redis for multi-agent consumption
+            brain_bus.publish_brain_state(brain, shared_state["gaze_x"],
+                                          shared_state["gaze_y"],
+                                          shared_state["engagement"])
+
+            # Check for calibration drift
+            drift = brain_bus.detect_drift(shared_state["engagement"])
+            if drift:
+                print(f"[DRIFT] Engagement drifted {drift['direction']} "
+                      f"(z={drift['z_score']:.1f}, baseline={drift['baseline_mean']:.3f}, "
+                      f"current={drift['current']:.3f})", flush=True)
+
             # ErrP check after actions
             if shared_state["last_action_time"] > 0:
                 errp = detect_errp(w, shared_state["last_action_time"])
@@ -567,6 +714,14 @@ def perception_loop(cam_idx, gaze_estimator, eeg):
                         shared_state.get("_last_element_id", ""),
                         shared_state["engagement"],
                         brain, reward
+                    )
+
+                    # Record in Redis session memory
+                    brain_bus.record_selection(
+                        shared_state.get("_last_element_id", ""),
+                        shared_state["engagement"],
+                        shared_state["brain_persona"],
+                        float(reward),
                     )
 
                     shared_state["last_action_time"] = 0
@@ -689,6 +844,8 @@ async def broadcast_loop():
                 "bandit_avg_reward": round(shared_state["bandit_avg_reward"], 3),
                 "threshold": round(shared_state["engine"].select_threshold, 3)
                              if shared_state["engine"] else 0.75,
+                "session_id": SESSION_ID,
+                "has_redis": HAS_REDIS,
             })
 
             if shared_state["selected"]:
