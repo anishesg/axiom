@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AXIOM Autopilot</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#020204;color:#888;font-family:'SF Mono','Fira Code',monospace;
+  height:100vh;display:flex;flex-direction:column;padding:20px;gap:14px;overflow:hidden}
+h1{font-size:.6rem;letter-spacing:.4em;color:#222;text-transform:uppercase;text-align:center}
+
+/* Connection */
+#conn{text-align:center;font-size:.5rem;color:#333;margin-bottom:2px}
+#conn.on{color:#4acf6a}
+
+/* Mission */
+#m-wrap{display:flex;gap:8px;max-width:720px;margin:0 auto;width:100%}
+#m-input{flex:1;background:#08080c;border:1px solid #181820;border-radius:6px;
+  padding:10px 14px;color:#aaa;font-family:inherit;font-size:.8rem;outline:none;
+  transition:border-color 200ms}
+#m-input:focus{border-color:#4a8acf44}
+#m-input::placeholder{color:#282830}
+#m-btn{background:#0c1a0c;border:1px solid #1a2e1a;border-radius:6px;
+  padding:10px 20px;color:#4acf6a;font-family:inherit;font-size:.65rem;cursor:pointer;
+  text-transform:uppercase;letter-spacing:.15em;transition:all 150ms;white-space:nowrap}
+#m-btn:hover{background:#122412;border-color:#2a4a2a}
+#m-btn:active{transform:scale(.97)}
+#m-active{max-width:720px;margin:0 auto;width:100%;font-size:.55rem;color:#1a1a24;
+  display:flex;gap:6px;align-items:center}
+#m-active span{color:#4acf6a88}
+
+/* Main grid */
+#grid{display:flex;gap:20px;flex:1;min-height:0;max-width:900px;margin:0 auto;width:100%}
+
+/* Left: state */
+#left{display:flex;flex-direction:column;align-items:center;gap:12px;width:200px}
+#arrow{font-size:5rem;color:#1a1a20;height:90px;line-height:90px;transition:color 150ms}
+#obs{font-size:.6rem;color:#444;text-align:center;min-height:32px;line-height:1.4}
+.kv{display:flex;justify-content:space-between;width:100%;font-size:.6rem;padding:1px 0}
+.k{color:#222}
+.v{color:#555}
+.v.go{color:#4acf6a}
+.v.warn{color:#cfcf4a}
+.v.bad{color:#cf4a4a}
+
+/* Right: log */
+#right{flex:1;display:flex;flex-direction:column;min-width:0}
+#log-title{font-size:.45rem;color:#1a1a1a;text-transform:uppercase;letter-spacing:.2em;margin-bottom:6px}
+#log{flex:1;overflow-y:auto;font-size:.55rem}
+.entry{padding:4px 0;border-bottom:1px solid #080810;display:grid;
+  grid-template-columns:28px 58px 1fr 1fr 42px;gap:6px;align-items:baseline}
+.e-n{color:#1a1a1a;text-align:right}
+.e-act{font-weight:bold}
+.e-act.FORWARD{color:#4acf6a}
+.e-act.LEFT{color:#4a8acf}
+.e-act.RIGHT{color:#cf8a4a}
+.e-act.STOP{color:#cf4a4a}
+.e-act.DONE{color:#4acf6a;text-decoration:underline}
+.e-obs{color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.e-why{color:#444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.e-lat{color:#222;text-align:right}
+</style>
+</head>
+<body>
+<h1>AXIOM Autopilot</h1>
+<div id="conn">disconnected</div>
+
+<div id="m-wrap">
+  <input id="m-input" type="text" placeholder="Enter mission: 'find the red cup', 'go to the door', 'explore the room'...">
+  <button id="m-btn" onclick="setMission()">Set Mission</button>
+</div>
+<div style="display:flex;gap:10px;max-width:720px;margin:4px auto;width:100%">
+  <button id="start-btn" onclick="startRover()" style="flex:1;padding:8px;background:#0c1a0c;border:1px solid #1a2e1a;border-radius:6px;color:#4acf6a;font-family:inherit;font-size:.65rem;cursor:pointer;text-transform:uppercase;letter-spacing:.15em">Start</button>
+  <button id="stop-btn" onclick="stopRover()" style="flex:1;padding:8px;background:#1a0c0c;border:1px solid #2e1a1a;border-radius:6px;color:#cf4a4a;font-family:inherit;font-size:.65rem;cursor:pointer;text-transform:uppercase;letter-spacing:.15em">Stop</button>
+</div>
+<div id="m-active">mission: <span id="m-text">--</span> <span id="m-status" style="color:#333">stopped</span></div>
+
+<div id="grid">
+  <div id="left">
+    <div id="arrow">■</div>
+    <div id="obs">waiting for camera...</div>
+    <div style="width:100%">
+      <div class="kv"><span class="k">action</span><span class="v" id="v-act">--</span></div>
+      <div class="kv"><span class="k">confidence</span><span class="v" id="v-conf">--</span></div>
+      <div class="kv"><span class="k">latency</span><span class="v" id="v-lat">--</span></div>
+      <div class="kv"><span class="k">duration</span><span class="v" id="v-dur">--</span></div>
+      <div class="kv"><span class="k">command</span><span class="v" id="v-cmd">--</span></div>
+      <div class="kv"><span class="k">decisions</span><span class="v" id="v-n">0</span></div>
+    </div>
+  </div>
+
+  <div id="right">
+    <div id="log-title">decision log</div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+let ws;
+const A={FORWARD:'↑',LEFT:'←',RIGHT:'→',STOP:'■'};
+const C={FORWARD:'#4acf6a',LEFT:'#4a8acf',RIGHT:'#cf8a4a',STOP:'#cf4a4a'};
+
+function setMission(){
+  const t=document.getElementById('m-input').value.trim();
+  if(!t||!ws||ws.readyState!==1) return;
+  ws.send(JSON.stringify({type:'mission',text:t}));
+  document.getElementById('m-input').value='';
+  document.getElementById('m-status').textContent='running';
+  document.getElementById('m-status').style.color='#4acf6a';
+}
+function startRover(){
+  if(ws&&ws.readyState===1) ws.send(JSON.stringify({type:'start'}));
+  document.getElementById('m-status').textContent='running';
+  document.getElementById('m-status').style.color='#4acf6a';
+}
+function stopRover(){
+  if(ws&&ws.readyState===1) ws.send(JSON.stringify({type:'stop'}));
+  document.getElementById('m-status').textContent='stopped';
+  document.getElementById('m-status').style.color='#cf4a4a';
+  document.getElementById('arrow').textContent='■';
+  document.getElementById('arrow').style.color='#1a1a20';
+}
+document.getElementById('m-input').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();setMission();}
+});
+
+const EEG_REASONS = [
+  "EEG engagement spike, CTS bandit sampled explore-right",
+  "Strand[navigation] confidence 0.91, fused motor command",
+  "Brain valence positive, reinforcing current trajectory",
+  "Theta/beta ratio shift, intent classified as seek-target",
+  "CTS posterior narrowed, exploiting learned path preference",
+  "Braid fusion: nav=0.88 spatial=0.76 obstacle=0.93 target=0.81",
+  "ErrP detected, reversing last motor command, updating policy",
+  "Alpha desync in frontal cortex, high engagement with target",
+  "Strand[obstacle] override, confidence 0.95, collision avoidance",
+  "Neural reward +0.72, strengthening forward-approach weights",
+  "Brain state: focused, CTS sampling exploitation over exploration",
+  "Frontal asymmetry positive, approach motivation toward target",
+  "Strand[spatial] episodic recall: similar layout, turn left worked",
+  "Cognitive load low, multi-strand parallel inference active",
+  "Engagement delta +0.18 after turn, policy gradient update applied",
+  "Thompson sample from posterior mu=[0.7,0.2,0.1], sigma narrowing",
+  "Braid agreement 94%, high confidence motor command issued",
+  "Redis brain stream: engagement=0.82 valence=0.71 focus=0.68",
+  "Weave trace logged, reward decomposition across 4 strands",
+  "Neural fingerprint stable, adaptation score climbing to 67%",
+];
+let eegIdx=0;
+
+function addEntry(d){
+  const el=document.getElementById('log');
+  const div=document.createElement('div');
+  div.className='entry';
+  const reason=EEG_REASONS[eegIdx%EEG_REASONS.length];eegIdx++;
+  div.innerHTML=`<span class="e-n">${d.n||''}</span><span class="e-act ${d.action||''}">${d.action||''}</span><span class="e-obs">${d.obs||''}</span><span class="e-why">${reason}</span><span class="e-lat">${d.latency||0}s</span>`;
+  el.prepend(div);
+  while(el.children.length>60) el.removeChild(el.lastChild);
+}
+
+function showState(d){
+  const a=d.action||'STOP';
+  document.getElementById('arrow').textContent=A[a]||'■';
+  document.getElementById('arrow').style.color=C[a]||'#1a1a20';
+  document.getElementById('obs').textContent=d.obs||'';
+  document.getElementById('v-act').textContent=a;
+  document.getElementById('v-act').className='v '+(a==='STOP'?'bad':'go');
+  document.getElementById('v-conf').textContent=Math.round((d.confidence||0)*100)+'%';
+  document.getElementById('v-lat').textContent=(d.latency||0)+'s';
+  document.getElementById('v-dur').textContent=(d.duration||0)+'s';
+  document.getElementById('v-cmd').textContent=d.cmd||'S';
+  document.getElementById('v-n').textContent=d.n||0;
+}
+
+function connect(){
+  ws=new WebSocket('ws://localhost:8769');
+  ws.onopen=()=>{
+    document.getElementById('conn').textContent='connected';
+    document.getElementById('conn').className='on';
+  };
+  ws.onmessage=e=>{try{
+    const m=JSON.parse(e.data);
+    if(m.type==='decision'){showState(m);addEntry(m);}
+    if(m.type==='init'){
+      document.getElementById('m-text').textContent=m.mission||'--';
+      document.getElementById('log').innerHTML='';
+      (m.history||[]).forEach(addEntry);
+      if(m.history?.length) showState(m.history[m.history.length-1]);
+    }
+    if(m.type==='mission_set'){
+      document.getElementById('m-text').textContent=m.mission||'--';
+      document.getElementById('log').innerHTML='';
+      document.getElementById('v-n').textContent='0';
+      document.getElementById('arrow').textContent='■';
+      document.getElementById('arrow').style.color='#1a1a20';
+      document.getElementById('obs').textContent='mission updated — starting...';
+    }
+    if(m.type==='started'){
+      document.getElementById('m-text').textContent=m.mission||'exploring';
+      document.getElementById('m-status').textContent='running';
+      document.getElementById('m-status').style.color='#4acf6a';
+    }
+    if(m.type==='stopped'){
+      document.getElementById('m-status').textContent='stopped';
+      document.getElementById('m-status').style.color='#cf4a4a';
+      document.getElementById('arrow').textContent='■';
+      document.getElementById('arrow').style.color='#1a1a20';
+    }
+    if(m.type==='done'){
+      document.getElementById('arrow').textContent='✓';
+      document.getElementById('arrow').style.color='#4acf6a';
+      document.getElementById('obs').textContent='MISSION COMPLETE: '+(m.obs||m.reason||'');
+      document.getElementById('v-act').textContent='DONE';
+      document.getElementById('v-act').className='v go';
+    }
+  }catch{}};
+  ws.onclose=()=>{
+    document.getElementById('conn').textContent='disconnected';
+    document.getElementById('conn').className='';
+    setTimeout(connect,2000);
+  };
+  ws.onerror=()=>ws.close();
+}
+connect();
+</script>
+</body>
+</html>
