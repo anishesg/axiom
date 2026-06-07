@@ -24,12 +24,14 @@ from neuralrl.cts import CTS
 from neuralrl.fingerprint import NeuralFingerprint
 from neuralrl.adaptation import AdaptationTracker
 from neuralrl.brain_stream import BrainPublisher, BrainSubscriber
-from neuralrl.structured_rl import BrainInterpreter, BrainInterpretation, StyleUpdate
+from neuralrl.structured_rl import BrainInterpreter, BrainInterpretation
 from neuralrl.weave_tracker import WeaveTracker
+from neuralrl.strand import Strand
+from neuralrl.braid import Braid
 
 __all__ = [
     "BrainReward", "CTS", "NeuralFingerprint", "AdaptationTracker",
     "BrainPublisher", "BrainSubscriber",
-    "BrainInterpreter", "BrainInterpretation", "StyleUpdate",
-    "WeaveTracker",
+    "BrainInterpreter", "BrainInterpretation",
+    "WeaveTracker", "Strand", "Braid",
 ]

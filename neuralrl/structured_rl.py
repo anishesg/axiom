@@ -1,93 +1,156 @@
-"""StructuredRL — OpenAI Structured Outputs for guaranteed-parseable RL signals.
+"""StructuredRL — OpenAI gpt-5.5-instant with grounded brain interpretation.
 
-Uses Pydantic models + OpenAI's structured output mode to ensure every
-brain-to-intent interpretation is type-safe. No regex, no parse failures.
-The RL loop gets clean, typed data every single time.
-
-    interpreter = BrainInterpreter()
-    result = interpreter.interpret(brain_features, conversation_context)
-    # result.intent, result.phrase, result.confidence, result.alternatives
+The key insight: the LLM must be CONSTRAINED by brain signals, not just
+informed. We do this by:
+1. Mapping brain metrics to concrete behavioral instructions (not vibes)
+2. Feeding back high-reward past responses as few-shot examples
+3. Using strand confidence to weight which dimensions to emphasize
+4. Strict structured output so the RL loop always gets clean data
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional
 from openai import OpenAI
+
+MODEL = "gpt-5.5-instant"
 
 
 class BrainInterpretation(BaseModel):
-    """Structured output from brain signal interpretation."""
-    intent: str = Field(description="Detected intent: agree, disagree, elaborate, question, acknowledge, express_emotion, correct")
-    phrase: str = Field(description="The best response phrase to speak")
-    confidence: float = Field(description="Confidence in this interpretation, 0-1")
-    emotion: str = Field(description="Detected emotion: neutral, happy, concerned, excited, thoughtful, frustrated")
-    alternatives: list[str] = Field(description="3 alternative response phrases")
-    style_feedback: str = Field(description="Brief feedback on what communication style traits this brain pattern suggests: formal/casual, brief/verbose, warm/cool")
-
-
-class StyleUpdate(BaseModel):
-    """Structured output for RL style parameter updates."""
-    formality: float = Field(description="0=very casual, 1=very formal")
-    enthusiasm: float = Field(description="0=subdued, 1=energetic")
-    verbosity: float = Field(description="0=brief, 1=detailed")
-    empathy: float = Field(description="0=matter-of-fact, 1=deeply empathetic")
-    humor: float = Field(description="0=serious, 1=playful")
-    assertiveness: float = Field(description="0=tentative, 1=confident")
-    expressiveness: float = Field(description="0=restrained, 1=expressive")
-    warmth: float = Field(description="0=cool/professional, 1=warm/personal")
-    reasoning: str = Field(description="Brief explanation of why these values based on the brain signals")
+    intent: str = Field(description="One of: agree, disagree, elaborate, question, acknowledge, express_emotion, correct")
+    response: str = Field(description="Full natural conversational response. Match length to the question depth.")
+    alternative: str = Field(description="A different response with a different angle or tone, also full length.")
+    confidence: float = Field(description="0-1 confidence in this interpretation")
+    emotion: str = Field(description="One of: neutral, happy, concerned, excited, thoughtful, frustrated")
 
 
 class BrainInterpreter:
-    """Uses OpenAI Structured Outputs to interpret brain signals into actions."""
+    """Grounded brain-to-speech with episodic memory feedback."""
 
-    def __init__(self, api_key=None, model="gpt-4o-mini"):
+    def __init__(self, api_key=None, model=MODEL):
         self._client = OpenAI(api_key=api_key) if api_key else OpenAI()
         self._model = model
+        self._high_reward_examples = []
+        self._low_reward_examples = []
+        self._max_examples = 5
+
+    def record_outcome(self, response_text: str, reward: float, brain_features: dict):
+        """Feed back what worked and what didn't — grounds future generation."""
+        entry = {"text": response_text, "reward": round(reward, 3),
+                 "engagement": round(brain_features.get("engagement", 0), 2),
+                 "valence": round(brain_features.get("valence", 0.5), 2)}
+
+        if reward > 0.3:
+            self._high_reward_examples.append(entry)
+            if len(self._high_reward_examples) > self._max_examples:
+                self._high_reward_examples.pop(0)
+        elif reward < -0.1:
+            self._low_reward_examples.append(entry)
+            if len(self._low_reward_examples) > self._max_examples:
+                self._low_reward_examples.pop(0)
 
     def interpret(self, brain_features: dict, conversation_context: str,
-                  style_params: dict = None) -> BrainInterpretation:
-        brain_str = ", ".join(f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}"
-                             for k, v in brain_features.items())
-        style_str = ""
-        if style_params:
-            style_str = f"\nCurrent style: {', '.join(f'{k}={v:.2f}' for k,v in style_params.items())}"
+                  style_params: dict = None, strand_confidences: dict = None) -> BrainInterpretation:
+
+        # Build concrete instructions from brain metrics, not vague descriptions
+        instructions = self._brain_to_instructions(brain_features, style_params, strand_confidences)
+        grounding = self._build_grounding()
+
+        system = (
+            "You ARE a person in a live conversation. You cannot speak — "
+            "an EEG headband reads your brain and you generate what you'd say.\n\n"
+            f"{instructions}\n"
+            f"{grounding}\n"
+            "RULES:\n"
+            "- Respond to what was JUST said. Be specific.\n"
+            "- Match response length to the question — deep question = detailed answer.\n"
+            "- Sound human. Contractions, natural phrasing.\n"
+            "- The 'alternative' must take a genuinely different angle, not rephrase."
+        )
 
         resp = self._client.beta.chat.completions.parse(
             model=self._model,
             messages=[
-                {"role": "system", "content":
-                    "You interpret EEG brain signals to generate speech for a non-verbal user. "
-                    "Based on the brain state and conversation context, determine what the user "
-                    "wants to say. Generate natural, human responses. Keep the main phrase 1-2 sentences."},
-                {"role": "user", "content":
-                    f"Brain state: {brain_str}\n"
-                    f"Conversation:\n{conversation_context}"
-                    f"{style_str}\n\n"
-                    f"What does this person want to say?"},
+                {"role": "system", "content": system},
+                {"role": "user", "content": f"Conversation:\n{conversation_context}\n\nRespond:"},
             ],
             response_format=BrainInterpretation,
+            temperature=0.7,
         )
         return resp.choices[0].message.parsed
 
-    def suggest_style(self, brain_features: dict, reward_history: list[float],
-                      current_style: dict) -> StyleUpdate:
-        brain_str = ", ".join(f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}"
-                             for k, v in brain_features.items())
-        recent_rewards = reward_history[-10:] if reward_history else []
+    def _brain_to_instructions(self, brain: dict, style: dict = None,
+                                strand_conf: dict = None) -> str:
+        """Convert brain metrics to CONCRETE behavioral instructions."""
+        eng = brain.get("engagement", 0.5)
+        val = brain.get("valence", 0.5)
+        focus = brain.get("focus", 0.5)
+        cog = brain.get("cognitive_load", 0.5)
+        intent = brain.get("intent", "acknowledge")
 
-        resp = self._client.beta.chat.completions.parse(
-            model=self._model,
-            messages=[
-                {"role": "system", "content":
-                    "You are an RL style optimizer. Based on brain signals and reward history, "
-                    "suggest optimal communication style parameters for this user. "
-                    "Higher rewards mean the user's brain responded positively to that style."},
-                {"role": "user", "content":
-                    f"Brain state: {brain_str}\n"
-                    f"Current style: {current_style}\n"
-                    f"Recent rewards: {recent_rewards}\n"
-                    f"Suggest optimal style parameters:"},
-            ],
-            response_format=StyleUpdate,
-        )
-        return resp.choices[0].message.parsed
+        parts = []
+
+        # Intent → concrete instruction
+        intent_map = {
+            "agree": "You AGREE with what was said. Express genuine agreement and build on their point.",
+            "disagree": "You DISAGREE. Push back respectfully but clearly. Say why.",
+            "elaborate": "You want to EXPLAIN your thinking in detail. Go deep.",
+            "question": "You want to ASK a follow-up question. Be curious and specific.",
+            "acknowledge": "You want to briefly acknowledge what was said, then continue naturally.",
+            "express_emotion": "You want to share how you FEEL about this. Be emotionally honest.",
+            "correct": "You want to CORRECT something. Be clear about what's wrong and why.",
+        }
+        parts.append(intent_map.get(intent, "Respond naturally."))
+
+        # Engagement → response depth
+        if eng > 0.7:
+            parts.append("You're highly engaged — give a substantive, detailed response.")
+        elif eng < 0.3:
+            parts.append("You're not very engaged — keep it brief and to the point.")
+
+        # Valence → emotional tone
+        if val > 0.65:
+            parts.append("You're feeling positive — let warmth come through.")
+        elif val < 0.35:
+            parts.append("You're feeling negative or uneasy — don't fake positivity.")
+
+        # Cognitive load → complexity
+        if cog > 0.6:
+            parts.append("You're thinking hard — your response should reflect careful thought.")
+
+        # Style params → concrete adjustments
+        if style:
+            if style.get("formality", 0.5) > 0.7:
+                parts.append("Use formal language.")
+            elif style.get("formality", 0.5) < 0.3:
+                parts.append("Be very casual — slang is fine.")
+            if style.get("humor", 0.5) > 0.6:
+                parts.append("Include a touch of humor if appropriate.")
+            if style.get("empathy", 0.5) > 0.7:
+                parts.append("Show deep empathy — acknowledge their feelings.")
+
+        # Strand confidence → which dimensions to trust
+        if strand_conf:
+            most_confident = max(strand_conf, key=strand_conf.get)
+            least_confident = min(strand_conf, key=strand_conf.get)
+            if strand_conf[most_confident] > 0.8:
+                parts.append(f"Prioritize {most_confident} — the system is most confident about that dimension.")
+
+        return "\n".join(parts)
+
+    def _build_grounding(self) -> str:
+        """Build few-shot grounding from past high/low reward responses."""
+        if not self._high_reward_examples and not self._low_reward_examples:
+            return ""
+
+        parts = ["GROUNDING (what this brain responded to in the past):"]
+
+        if self._high_reward_examples:
+            parts.append("Brain LIKED these responses (high engagement/positive valence):")
+            for ex in self._high_reward_examples[-3:]:
+                parts.append(f'  ✓ "{ex["text"]}" (reward={ex["reward"]})')
+
+        if self._low_reward_examples:
+            parts.append("Brain DISLIKED these (low engagement/negative valence):")
+            for ex in self._low_reward_examples[-2:]:
+                parts.append(f'  ✗ "{ex["text"]}" (reward={ex["reward"]})')
+
+        return "\n".join(parts)

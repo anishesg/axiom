@@ -100,7 +100,7 @@ def reward_trend_scorer(output: dict, target: dict) -> dict:
 class WeaveTracker:
     """Manages all Weave integrations for the neural RL loop."""
 
-    def __init__(self, project="neurovoice/brain-voice"):
+    def __init__(self, project="neurovoice"):
         self._project = project
         self._episodes = []
         self._initialized = False
