@@ -154,7 +154,7 @@ class AttentionEngine:
         """[IMPROVEMENT 5] Scale dwell/select thresholds by element density."""
         n = max(2, n_elements)
         # base_dwell=500ms for 4 elements, scales logarithmically
-        self.dwell_saturate = 0.5 * (1 + math.log2(n / 4))
+        self.dwell_saturate = max(0.4, 0.5 * (1 + math.log2(max(4, n) / 4)))
         # select threshold: higher for denser layouts
         self.select_threshold = min(0.85, 0.65 + 0.03 * n)
 
