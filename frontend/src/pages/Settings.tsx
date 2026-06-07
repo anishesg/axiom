@@ -191,19 +191,12 @@ export function Settings() {
               </div>
             </section>
 
-            {/* Privacy Section */}
+            {/* Analytics Section */}
             <section>
               <h2 className="text-label-lg text-on-surface-variant uppercase tracking-widest mb-stack-sm">
-                Privacy
+                Analytics
               </h2>
               <div className="border-t border-surface-variant">
-                <button className="w-full flex justify-between items-center py-6 hover:bg-surface-container-low transition-colors active:scale-[0.99]">
-                  <span className="text-headline-md">Data Encryption Settings</span>
-                  <span className="material-symbols-outlined text-on-surface-variant">
-                    chevron_right
-                  </span>
-                </button>
-                <div className="border-t border-surface-variant" />
                 <div className="flex justify-between items-center py-6">
                   <span className="text-headline-md">Usage Analytics</span>
                   <Toggle checked={usageAnalytics} onChange={setUsageAnalytics} />

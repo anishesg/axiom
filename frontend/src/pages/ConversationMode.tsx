@@ -299,104 +299,103 @@ export function ConversationMode() {
     <Layout showBackButton backTo="/communicate" backLabel="Back" showNav={false}>
       {/* Name Setup Modal */}
       {showNameModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-xl">
-            <h2 className="text-headline-md text-primary mb-6">Set Up Conversation</h2>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl p-7 max-w-[380px] w-full mx-4 shadow-2xl animate-scale-in">
+            <h2 className="text-headline-md text-primary mb-1">Set Up Conversation</h2>
+            <p className="text-body-md text-on-surface-variant mb-6">Enter names for both participants</p>
 
-            <div className="space-y-4 mb-6">
+            <div className="space-y-5 mb-7">
               <div>
-                <label className="block text-label-sm text-on-surface-variant mb-2">
-                  Speaker Name (person who can speak)
+                <label className="block text-[12px] font-medium text-on-surface-variant mb-2 uppercase tracking-wide">
+                  Speaker Name
                 </label>
                 <input
                   type="text"
                   value={speakerName}
                   onChange={(e) => setSpeakerName(e.target.value)}
-                  className="w-full px-4 py-3 border border-outline-variant rounded-lg text-body-md focus:outline-none focus:border-primary"
-                  placeholder="Adam"
+                  className="w-full px-4 py-3 border border-outline-variant rounded-xl text-body-md focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all"
+                  placeholder="e.g. Adam"
                 />
               </div>
 
               <div>
-                <label className="block text-label-sm text-on-surface-variant mb-2">
-                  EEG User Name (person using brain signals)
+                <label className="block text-[12px] font-medium text-on-surface-variant mb-2 uppercase tracking-wide">
+                  EEG User Name
                 </label>
                 <input
                   type="text"
                   value={eegUserName}
                   onChange={(e) => setEegUserName(e.target.value)}
-                  className="w-full px-4 py-3 border border-outline-variant rounded-lg text-body-md focus:outline-none focus:border-primary"
-                  placeholder="Josh"
+                  className="w-full px-4 py-3 border border-outline-variant rounded-xl text-body-md focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all"
+                  placeholder="e.g. Josh"
                 />
               </div>
             </div>
 
-            <div className="flex gap-4">
+            <div className="flex gap-3">
               <button
                 onClick={() => navigate('/communicate')}
-                className="flex-1 px-6 py-3 border border-outline text-on-surface-variant rounded-lg hover:bg-surface-container transition-colors"
+                className="flex-1 px-5 py-3 border border-outline-variant text-on-surface-variant rounded-xl hover:bg-surface-container-low transition-all text-[14px] font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={handleStartConversation}
                 disabled={!speakerName.trim() || !eegUserName.trim()}
-                className="flex-1 px-6 py-3 bg-primary text-on-primary rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+                className="flex-1 px-5 py-3 bg-primary text-on-primary rounded-xl hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all disabled:opacity-40 disabled:hover:shadow-none disabled:hover:translate-y-0 text-[14px] font-medium"
               >
-                Start Conversation
+                Start
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <main className="flex-grow flex flex-col h-[calc(100vh-120px)] max-w-[900px] mx-auto w-full px-margin-page py-stack-sm">
+      <main className="flex-grow flex flex-col h-[calc(100vh-120px)] max-w-[800px] mx-auto w-full px-6 py-4">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="text-headline-md text-primary">Conversation Mode</h1>
-            <p className="text-body-md text-on-surface-variant">{getStatusText()}</p>
+            <h1 className="text-[22px] font-semibold text-primary tracking-tight">Conversation Mode</h1>
+            <p className="text-[14px] text-on-surface-variant mt-0.5">{getStatusText()}</p>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-4 py-2 bg-surface-container-low rounded-full">
-              <SignalStrength level={signalStrength} maxLevel={4} />
-              <span className="text-label-sm text-on-surface-variant">
-                {connectionState === 'streaming' ? 'EEG Active' : 'Connecting...'}
-              </span>
-            </div>
+          <div className="flex items-center gap-2.5 px-4 py-2 bg-surface-container-low rounded-full border border-outline-variant/50">
+            <SignalStrength level={signalStrength} maxLevel={4} />
+            <span className="text-[12px] text-on-surface-variant font-medium">
+              {connectionState === 'streaming' ? 'EEG Active' : 'Connecting...'}
+            </span>
           </div>
         </div>
 
         {/* Live EEG Visualization (when listening) */}
         {turnState === 'listening_eeg' && (
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-label-sm text-on-surface-variant">
+          <div className="mb-5 p-4 bg-surface-container-low rounded-xl border border-outline-variant/30 animate-fade-in">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[12px] font-medium text-on-surface-variant uppercase tracking-wide">
                 Reading {eegUserName}'s brain activity
               </span>
-              <span className="text-label-sm text-primary font-medium">
+              <span className="text-[13px] text-primary font-semibold">
                 {Math.round(eegListeningProgress)}%
               </span>
             </div>
-            <div className="h-1 bg-surface-container-high rounded-full overflow-hidden mb-2">
+            <div className="h-1.5 bg-outline-variant/30 rounded-full overflow-hidden mb-3">
               <div
-                className="h-full bg-primary transition-all duration-100"
+                className="h-full bg-primary rounded-full transition-all duration-150 ease-out"
                 style={{ width: `${eegListeningProgress}%` }}
               />
             </div>
-            <EEGWaveform data={rawEEG} height={120} showLabels={false} animate={true} />
+            <EEGWaveform data={rawEEG} height={100} showLabels={false} animate={true} />
           </div>
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2">
+        <div className="flex-1 overflow-y-auto space-y-4 mb-4 pr-1 scrollbar-thin">
           {messages.length === 0 && conversationActive && (
             <div className="flex items-center justify-center h-full text-on-surface-variant">
-              <div className="text-center">
-                <span className="material-symbols-outlined text-5xl opacity-30 block mb-2">
-                  chat
+              <div className="text-center py-12">
+                <span className="material-symbols-outlined text-[48px] text-on-surface-variant/20 block mb-3">
+                  forum
                 </span>
-                <p className="text-body-md">
+                <p className="text-[15px] text-on-surface-variant/60">
                   Click the microphone to start speaking to {eegUserName}
                 </p>
               </div>
@@ -406,23 +405,23 @@ export function ConversationMode() {
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${
+              className={`flex animate-fade-in ${
                 message.sender === 'speaker' ? 'justify-start' : 'justify-end'
               }`}
             >
               <div
-                className={`max-w-[80%] rounded-xl overflow-hidden ${
+                className={`max-w-[75%] rounded-2xl overflow-hidden shadow-sm ${
                   message.sender === 'speaker'
-                    ? 'bg-surface-container'
+                    ? 'bg-surface-container-low border border-outline-variant/30'
                     : 'bg-primary-container'
                 }`}
               >
                 {/* EEG User: Show waveform snapshot */}
                 {message.sender === 'eeg_user' && message.eegSnapshot && (
-                  <div className="p-3 bg-surface-container-lowest">
+                  <div className="p-3 bg-white/5 border-b border-white/10">
                     <EEGWaveformSnapshot
                       data={message.eegSnapshot}
-                      height={100}
+                      height={80}
                       showLabels={false}
                     />
                   </div>
@@ -432,30 +431,25 @@ export function ConversationMode() {
                 <div className="p-4">
                   {/* Cognitive state for EEG user */}
                   {message.sender === 'eeg_user' && message.cognitiveState && (
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-label-sm text-on-surface-variant">
-                        Cognitive State:
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-[11px] text-white/60 uppercase tracking-wide">
+                        State
                       </span>
-                      <span className="px-2 py-0.5 bg-primary/10 text-primary text-label-sm rounded-full font-medium">
+                      <span className="px-2.5 py-1 bg-white/15 text-white text-[12px] rounded-full font-medium">
                         {message.cognitiveState.emotion}
                       </span>
                     </div>
                   )}
 
-                  {/* Response label for EEG user */}
-                  {message.sender === 'eeg_user' && (
-                    <div className="text-label-sm text-on-surface-variant mb-1">
-                      Response:
-                    </div>
-                  )}
+                  <p className={`text-[16px] leading-relaxed ${message.sender === 'eeg_user' ? 'text-white' : 'text-on-surface'}`}>
+                    {message.text}
+                  </p>
 
-                  <p className="text-body-lg text-on-surface">{message.text}</p>
-
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-label-sm text-on-surface-variant">
+                  <div className="flex items-center justify-between mt-3 pt-2 border-t border-white/10">
+                    <span className={`text-[12px] font-medium ${message.sender === 'eeg_user' ? 'text-white/70' : 'text-on-surface-variant'}`}>
                       {message.sender === 'speaker' ? speakerName : eegUserName}
                     </span>
-                    <span className="text-label-sm text-on-surface-variant opacity-60">
+                    <span className={`text-[11px] ${message.sender === 'eeg_user' ? 'text-white/40' : 'text-on-surface-variant/50'}`}>
                       {message.timestamp.toLocaleTimeString([], {
                         hour: '2-digit',
                         minute: '2-digit',
@@ -471,12 +465,12 @@ export function ConversationMode() {
 
         {/* Speech Recognition Status */}
         {turnState === 'speaker_speaking' && (
-          <div className="mb-4 p-4 bg-surface-container-low rounded-lg">
+          <div className="mb-4 p-4 bg-surface-container-low rounded-xl border border-outline-variant/30 animate-fade-in">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-3 h-3 bg-error rounded-full animate-pulse" />
-              <span className="text-label-sm text-on-surface-variant">Recording...</span>
+              <div className="w-2.5 h-2.5 bg-error rounded-full signal-pulse" />
+              <span className="text-[12px] font-medium text-on-surface-variant uppercase tracking-wide">Recording</span>
             </div>
-            <p className="text-body-lg text-primary min-h-[1.5em]">
+            <p className="text-[17px] text-primary min-h-[1.5em] leading-relaxed">
               {transcript || interimTranscript || 'Listening...'}
             </p>
           </div>
@@ -484,40 +478,40 @@ export function ConversationMode() {
 
         {/* Speech Error */}
         {speechError && (
-          <div className="mb-4 p-4 bg-error-container text-on-error-container rounded-lg">
-            <p className="text-body-md">{speechError}</p>
+          <div className="mb-4 p-4 bg-error-container text-on-error-container rounded-xl">
+            <p className="text-[14px]">{speechError}</p>
           </div>
         )}
 
         {/* Controls */}
-        <div className="flex items-center justify-center gap-4">
+        <div className="flex items-center justify-center gap-3 pt-2">
           {conversationActive && turnState === 'idle' && (
             <button
               onClick={handleStartSpeaking}
               disabled={!speechSupported}
-              className="flex items-center gap-3 px-8 py-4 min-h-target-min bg-primary text-on-primary rounded-full hover:opacity-90 active:scale-95 transition-all disabled:opacity-50"
+              className="flex items-center gap-2.5 px-6 py-3.5 bg-primary text-on-primary rounded-xl hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all disabled:opacity-40 disabled:hover:shadow-none disabled:hover:translate-y-0"
             >
-              <span className="material-symbols-outlined text-2xl">mic</span>
-              <span className="text-label-lg">Speak to {eegUserName}</span>
+              <span className="material-symbols-outlined text-[22px]">mic</span>
+              <span className="text-[14px] font-medium">Speak to {eegUserName}</span>
             </button>
           )}
 
           {turnState === 'speaker_speaking' && (
             <button
               onClick={handleSpeakerFinished}
-              className="flex items-center gap-3 px-8 py-4 min-h-target-min bg-error text-on-error rounded-full hover:opacity-90 active:scale-95 transition-all"
+              className="flex items-center gap-2.5 px-6 py-3.5 bg-primary text-on-primary rounded-xl hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 transition-all"
             >
-              <span className="material-symbols-outlined text-2xl">send</span>
-              <span className="text-label-lg">Done Speaking</span>
+              <span className="material-symbols-outlined text-[22px]">send</span>
+              <span className="text-[14px] font-medium">Done Speaking</span>
             </button>
           )}
 
           {(turnState === 'listening_eeg' || turnState === 'generating_response') && (
-            <div className="flex items-center gap-3 px-8 py-4 min-h-target-min bg-surface-container text-on-surface-variant rounded-full">
-              <span className="material-symbols-outlined text-2xl animate-pulse">
+            <div className="flex items-center gap-2.5 px-6 py-3.5 bg-surface-container-low text-on-surface-variant rounded-xl border border-outline-variant/30">
+              <span className="material-symbols-outlined text-[22px] animate-pulse-thin">
                 neurology
               </span>
-              <span className="text-label-lg">
+              <span className="text-[14px] font-medium">
                 {turnState === 'listening_eeg'
                   ? `Reading ${eegUserName}'s signals...`
                   : 'Generating response...'}
@@ -528,10 +522,10 @@ export function ConversationMode() {
           {conversationActive && (
             <button
               onClick={handleEndConversation}
-              className="flex items-center gap-2 px-6 py-3 border border-outline text-on-surface-variant rounded-full hover:bg-surface-container transition-colors"
+              className="flex items-center gap-2 px-5 py-3 border border-outline-variant text-on-surface-variant rounded-xl hover:bg-surface-container-low transition-all text-[14px] font-medium"
             >
-              <span className="material-symbols-outlined">close</span>
-              <span className="text-label-lg">End</span>
+              <span className="material-symbols-outlined text-[18px]">close</span>
+              End
             </button>
           )}
         </div>

@@ -279,30 +279,10 @@ export function CommunicationHub() {
 
       {/* Footer */}
       <footer className="w-full bottom-0 bg-background border-t border-secondary-container py-stack-sm mt-auto">
-        <div className="flex flex-col md:flex-row justify-between items-center w-full px-margin-page max-w-[1200px] mx-auto gap-4">
+        <div className="flex justify-center items-center w-full px-margin-page max-w-[1200px] mx-auto">
           <span className="text-label-sm text-on-surface-variant uppercase tracking-wider">
-            © 2024 ELEVEN MEDICAL SYSTEMS. ALL RIGHTS RESERVED.
+            © 2026 ELEVEN
           </span>
-          <div className="flex gap-stack-md">
-            <a
-              className="text-label-sm text-on-surface-variant hover:text-primary transition-colors"
-              href="#"
-            >
-              Privacy
-            </a>
-            <a
-              className="text-label-sm text-on-surface-variant hover:text-primary transition-colors"
-              href="#"
-            >
-              Terms
-            </a>
-            <a
-              className="text-label-sm text-on-surface-variant hover:text-primary transition-colors"
-              href="#"
-            >
-              Support
-            </a>
-          </div>
         </div>
       </footer>
 

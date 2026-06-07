@@ -102,7 +102,7 @@ export function ConnectDevice() {
   return (
     <Layout showBackButton backTo="/" backLabel="Back">
       <main className="flex-grow flex items-center justify-center px-gutter py-stack-lg">
-        <div className="w-full max-w-[480px] bg-surface-container-lowest border border-on-background p-stack-lg flex flex-col items-center gap-stack-md">
+        <div className="w-full max-w-[420px] bg-white border border-outline-variant rounded-2xl p-8 flex flex-col items-center gap-7 shadow-sm">
           {/* Connection Status */}
           <SignalIndicator
             status={status === 'connected' ? 'connected' : 'disconnected'}
@@ -113,9 +113,9 @@ export function ConnectDevice() {
           {/* Header Section */}
           <div className="text-center space-y-2">
             <h1 className="text-headline-lg text-primary tracking-tight">
-              Connect your headband.
+              Connect your headband
             </h1>
-            <p className="text-body-md text-on-surface-variant max-w-[320px] mx-auto">
+            <p className="text-body-md text-on-surface-variant max-w-[300px] mx-auto leading-relaxed">
               {useSimulation
                 ? 'Running in simulation mode with synthetic EEG data.'
                 : 'Initialize your Muse S neural interface via Bluetooth.'}
@@ -123,17 +123,17 @@ export function ConnectDevice() {
           </div>
 
           {/* Central Pulsing Circle */}
-          <div className="relative w-48 h-48 flex items-center justify-center">
+          <div className="relative w-40 h-40 flex items-center justify-center my-2">
             {/* Pulse rings */}
             {status === 'connecting' && (
               <>
-                <div className="pulse-ring absolute w-48 h-48 border border-primary rounded-full animate-pulse-ring" />
+                <div className="absolute w-40 h-40 border border-primary/30 rounded-full animate-pulse-ring" />
                 <div
-                  className="pulse-ring absolute w-48 h-48 border border-primary rounded-full animate-pulse-ring"
+                  className="absolute w-40 h-40 border border-primary/30 rounded-full animate-pulse-ring"
                   style={{ animationDelay: '1s' }}
                 />
                 <div
-                  className="pulse-ring absolute w-48 h-48 border border-primary rounded-full animate-pulse-ring"
+                  className="absolute w-40 h-40 border border-primary/30 rounded-full animate-pulse-ring"
                   style={{ animationDelay: '2s' }}
                 />
               </>
@@ -141,23 +141,23 @@ export function ConnectDevice() {
 
             {/* Central circle */}
             <div
-              className={`z-10 w-32 h-32 rounded-full border flex items-center justify-center bg-background transition-all duration-300 ${
+              className={`z-10 w-28 h-28 rounded-full flex items-center justify-center transition-all duration-500 ease-out ${
                 status === 'connected'
-                  ? 'border-primary bg-primary'
+                  ? 'bg-primary shadow-lg'
                   : status === 'error'
-                    ? 'border-error'
-                    : 'border-primary'
+                    ? 'bg-error-container border-2 border-error'
+                    : 'bg-surface-container-low border-2 border-outline-variant'
               }`}
             >
               <span
                 className={`material-symbols-outlined transition-all duration-300 ${
                   status === 'connected'
-                    ? 'text-on-primary text-[64px]'
+                    ? 'text-on-primary text-[48px]'
                     : status === 'error'
-                      ? 'text-error text-[64px]'
-                      : 'text-primary text-[64px]'
+                      ? 'text-error text-[48px]'
+                      : 'text-on-surface-variant text-[48px]'
                 }`}
-                style={{ fontVariationSettings: "'wght' 200" }}
+                style={{ fontVariationSettings: "'wght' 300" }}
               >
                 {status === 'connected'
                   ? 'check'
@@ -172,62 +172,60 @@ export function ConnectDevice() {
 
           {/* Error Message */}
           {error && (
-            <div className="w-full p-4 bg-error-container rounded border border-error">
+            <div className="w-full p-4 bg-error-container rounded-xl">
               <p className="text-body-md text-on-error-container text-center">
                 {error.message}
               </p>
-              <p className="text-label-sm text-on-error-container/70 text-center mt-2">
-                Make sure the Eleven server is running: <code className="bg-error/20 px-1 rounded">python -m eleven.cli server</code>
+              <p className="text-[11px] text-on-error-container/70 text-center mt-2">
+                Run: <code className="bg-error/10 px-1.5 py-0.5 rounded font-mono">python -m eleven.cli server</code>
               </p>
             </div>
           )}
 
           {/* Action Section */}
-          <div className="w-full space-y-stack-sm text-center">
+          <div className="w-full space-y-4 text-center">
             <button
               onClick={handleConnect}
               disabled={status === 'connected'}
-              className={`w-full min-h-target-min bg-primary text-on-primary text-label-lg uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
-                status === 'connecting' ? 'opacity-80' : ''
+              className={`w-full py-3.5 bg-primary text-on-primary text-[14px] font-medium rounded-lg transition-all flex items-center justify-center gap-2.5 ${
+                status === 'connecting' ? 'opacity-70' : ''
               } ${
                 status === 'connected'
-                  ? 'bg-primary/50 cursor-not-allowed'
-                  : 'hover:opacity-90 active:scale-[0.98]'
+                  ? 'opacity-50 cursor-not-allowed'
+                  : 'hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm'
               }`}
             >
               {getButtonContent()}
             </button>
 
             {/* Simulation Toggle */}
-            <div className="flex items-center justify-center gap-3 py-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={useSimulation}
-                  onChange={(e) => setUseSimulation(e.target.checked)}
-                  disabled={status === 'connecting' || status === 'connected'}
-                  className="w-4 h-4 accent-primary"
-                />
-                <span className="text-label-sm text-on-surface-variant">
-                  Use simulation mode (no device needed)
-                </span>
-              </label>
-            </div>
+            <label className="flex items-center justify-center gap-2.5 cursor-pointer py-1">
+              <input
+                type="checkbox"
+                checked={useSimulation}
+                onChange={(e) => setUseSimulation(e.target.checked)}
+                disabled={status === 'connecting' || status === 'connected'}
+                className="w-4 h-4 accent-primary rounded"
+              />
+              <span className="text-[13px] text-on-surface-variant">
+                Use simulation mode
+              </span>
+            </label>
 
-            <p className="text-label-sm text-on-surface-variant px-stack-sm">
+            <p className="text-[12px] text-on-surface-variant/70 leading-relaxed">
               {useSimulation
-                ? 'Simulation mode generates synthetic EEG signals for testing.'
-                : 'Ensure your Muse S headband is powered on and within range.'}
+                ? 'Generates synthetic EEG signals for testing.'
+                : 'Ensure your Muse S is powered on and nearby.'}
             </p>
           </div>
 
           {/* Signal Strength */}
           <div
-            className={`w-full pt-stack-sm border-t border-surface-container flex justify-between items-center transition-opacity ${
+            className={`w-full pt-5 border-t border-outline-variant/50 flex justify-between items-center transition-all duration-300 ${
               status === 'connected' ? 'opacity-100' : 'opacity-40'
             }`}
           >
-            <span className="text-label-sm text-on-surface-variant">SIGNAL STRENGTH</span>
+            <span className="text-[11px] text-on-surface-variant uppercase tracking-wider">Signal</span>
             <SignalStrength
               level={status === 'connected' ? signalStrength : 0}
               maxLevel={4}
@@ -236,18 +234,18 @@ export function ConnectDevice() {
 
           {/* Device Info (shown when connected) */}
           {status === 'connected' && (
-            <div className="w-full pt-stack-sm border-t border-surface-container">
+            <div className="w-full pt-4 border-t border-outline-variant/50 space-y-3 animate-fade-in">
               <div className="flex justify-between items-center">
-                <span className="text-label-sm text-on-surface-variant">DEVICE</span>
-                <span className="text-label-sm text-primary">
+                <span className="text-[11px] text-on-surface-variant uppercase tracking-wider">Device</span>
+                <span className="text-[13px] font-medium text-primary">
                   {useSimulation ? 'Simulation' : 'Muse S'}
                 </span>
               </div>
-              <div className="flex justify-between items-center mt-2">
-                <span className="text-label-sm text-on-surface-variant">STATUS</span>
-                <span className="text-label-sm text-primary flex items-center gap-1">
-                  <span className="w-2 h-2 bg-primary rounded-full animate-pulse" />
-                  {connectionState === 'streaming' ? 'Streaming EEG' : 'Ready'}
+              <div className="flex justify-between items-center">
+                <span className="text-[11px] text-on-surface-variant uppercase tracking-wider">Status</span>
+                <span className="text-[13px] font-medium text-primary flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-primary rounded-full signal-pulse" />
+                  {connectionState === 'streaming' ? 'Streaming' : 'Ready'}
                 </span>
               </div>
             </div>
