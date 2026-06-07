@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AXIOM · Live Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root { --bg:#06060e; --surface:#0c0c1a; --card:#111125; --border:#1e1e3a;
+          --text:#d0d0e8; --dim:#5a5a7a; --cyan:#00d4ff; --green:#00ff88;
+          --red:#ff4466; --orange:#ffaa33; --purple:#a855f7; --pink:#ff6b9d; }
+
+  body { background:var(--bg); color:var(--text); font-family:'Inter',sans-serif;
+         height:100vh; overflow:hidden; }
+
+  .layout { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:auto 1fr auto;
+            height:100vh; gap:1px; background:var(--border); }
+
+  /* ── Header ── */
+  .header { grid-column:1/-1; padding:12px 30px; background:var(--surface);
+            display:flex; align-items:center; justify-content:space-between; }
+  .header-left { display:flex; align-items:baseline; gap:14px; }
+  .logo { font-size:20px; font-weight:800; color:var(--red); letter-spacing:2px; }
+  .logo span { color:var(--dim); font-weight:400; font-size:12px; margin-left:8px; letter-spacing:0; }
+  .header-pills { display:flex; gap:8px; }
+  .pill { padding:4px 12px; border-radius:20px; font-size:10px; font-weight:600;
+          letter-spacing:1px; text-transform:uppercase; }
+  .pill.live { background:rgba(0,255,136,0.12); color:var(--green); border:1px solid rgba(0,255,136,0.2); }
+  .pill.eeg { background:rgba(0,212,255,0.12); color:var(--cyan); border:1px solid rgba(0,212,255,0.2); }
+  .pill.rl { background:rgba(168,85,247,0.12); color:var(--purple); border:1px solid rgba(168,85,247,0.2); }
+
+  /* ── Panels ── */
+  .panel { background:var(--surface); padding:20px; overflow-y:auto; }
+  .panel-title { font-size:10px; font-weight:700; color:var(--dim); letter-spacing:2px;
+                 text-transform:uppercase; margin-bottom:14px; }
+
+  /* ── Brain State (top-left) ── */
+  .brain-panel { display:flex; flex-direction:column; gap:16px; }
+  .brain-metric { display:flex; align-items:center; gap:12px; }
+  .bm-icon { width:36px; height:36px; border-radius:10px; display:flex; align-items:center;
+             justify-content:center; font-size:16px; }
+  .bm-info { flex:1; }
+  .bm-label { font-size:11px; color:var(--dim); margin-bottom:3px; }
+  .bm-value { font-size:22px; font-weight:700; font-family:'JetBrains Mono'; }
+  .bm-bar { height:4px; background:var(--border); border-radius:2px; margin-top:4px; }
+  .bm-fill { height:100%; border-radius:2px; transition:width 0.3s; }
+
+  .persona-display { padding:16px; border-radius:12px; background:var(--card); text-align:center; }
+  .persona-name { font-size:24px; font-weight:800; letter-spacing:3px; margin-bottom:4px; }
+  .persona-desc { font-size:11px; color:var(--dim); }
+
+  /* ── Agent Activity (top-right) ── */
+  .agent-list { display:flex; flex-direction:column; gap:10px; }
+  .agent-card { padding:14px; border-radius:10px; background:var(--card);
+                border-left:3px solid var(--border); transition:border-color 0.3s; }
+  .agent-card.active { border-left-color:var(--green); }
+  .agent-name { font-size:12px; font-weight:700; margin-bottom:4px; display:flex;
+                align-items:center; gap:8px; }
+  .agent-dot { width:6px; height:6px; border-radius:50%; background:var(--dim); }
+  .agent-card.active .agent-dot { background:var(--green); box-shadow:0 0 6px var(--green); }
+  .agent-status { font-size:10px; color:var(--dim); font-family:'JetBrains Mono'; }
+
+  .action-log { margin-top:16px; }
+  .log-entry { padding:8px 10px; border-radius:6px; background:var(--card);
+               margin-bottom:6px; font-size:10px; font-family:'JetBrains Mono';
+               border-left:2px solid var(--border); }
+  .log-entry.select { border-left-color:var(--green); }
+  .log-entry.improve { border-left-color:var(--purple); }
+  .log-entry.drift { border-left-color:var(--orange); }
+  .log-time { color:var(--dim); margin-right:8px; }
+
+  /* ── RL Panel (bottom-left) ── */
+  .rl-stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:16px; }
+  .rl-stat { padding:14px; border-radius:10px; background:var(--card); text-align:center; }
+  .rl-stat-value { font-size:28px; font-weight:800; font-family:'JetBrains Mono'; }
+  .rl-stat-label { font-size:9px; color:var(--dim); letter-spacing:1px; margin-top:4px; text-transform:uppercase; }
+
+  .threshold-viz { padding:14px; border-radius:10px; background:var(--card); }
+  .thresh-bar { height:24px; background:var(--border); border-radius:12px; position:relative;
+                margin:10px 0; overflow:visible; }
+  .thresh-fill { height:100%; border-radius:12px; transition:width 0.3s;
+                 background:linear-gradient(90deg, var(--cyan), var(--green)); }
+  .thresh-marker { position:absolute; top:-4px; width:4px; height:32px; background:white;
+                   border-radius:2px; transition:left 0.3s; }
+  .thresh-labels { display:flex; justify-content:space-between; font-size:9px; color:var(--dim); }
+
+  /* ── Element Map (bottom-right) ── */
+  .element-map { position:relative; background:var(--card); border-radius:10px;
+                 aspect-ratio:16/10; overflow:hidden; }
+  .map-el { position:absolute; border:1px solid var(--border); border-radius:4px;
+            transition:all 0.2s; display:flex; align-items:center; justify-content:center;
+            font-size:8px; color:var(--dim); }
+  .map-el.pinned { border-color:rgba(255,255,255,0.3); background:rgba(255,255,255,0.05); }
+  .map-el.locked { border-color:var(--red); background:rgba(229,9,20,0.1);
+                   box-shadow:0 0 10px rgba(229,9,20,0.2); }
+  .map-gaze { position:absolute; width:8px; height:8px; border-radius:50%;
+              background:var(--cyan); box-shadow:0 0 8px var(--cyan);
+              transform:translate(-50%,-50%); transition:left 0.08s, top 0.08s; }
+
+  /* ── Footer ── */
+  .footer { grid-column:1/-1; padding:8px 30px; background:var(--surface);
+            display:flex; align-items:center; justify-content:space-between;
+            font-size:10px; color:var(--dim); }
+  .footer-left { display:flex; gap:20px; }
+  .footer-metric { display:flex; align-items:center; gap:6px; }
+  .footer-dot { width:6px; height:6px; border-radius:50%; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">AXIOM<span>live dashboard</span></div>
+    </div>
+    <div class="header-pills">
+      <span class="pill live" id="pillLive">● LIVE</span>
+      <span class="pill eeg" id="pillEeg">EEG</span>
+      <span class="pill rl" id="pillRl">RL LEARNING</span>
+    </div>
+  </div>
+
+  <!-- Top Left: Brain State -->
+  <div class="panel">
+    <div class="panel-title">Brain State</div>
+    <div class="brain-panel">
+      <div class="persona-display" id="personaDisplay">
+        <div class="persona-name" id="personaName">--</div>
+        <div class="persona-desc" id="personaDesc">Waiting for signal...</div>
+      </div>
+
+      <div class="brain-metric">
+        <div class="bm-icon" style="background:rgba(0,212,255,0.12);color:var(--cyan)">⚡</div>
+        <div class="bm-info">
+          <div class="bm-label">Engagement</div>
+          <div class="bm-value" id="engValue" style="color:var(--cyan)">--</div>
+          <div class="bm-bar"><div class="bm-fill" id="engBar" style="background:var(--cyan);width:0"></div></div>
+        </div>
+      </div>
+
+      <div class="brain-metric">
+        <div class="bm-icon" style="background:rgba(0,255,136,0.12);color:var(--green)">◎</div>
+        <div class="bm-info">
+          <div class="bm-label">Current Confidence</div>
+          <div class="bm-value" id="confValue" style="color:var(--green)">0%</div>
+          <div class="bm-bar"><div class="bm-fill" id="confBar" style="background:var(--green);width:0"></div></div>
+        </div>
+      </div>
+
+      <div class="brain-metric">
+        <div class="bm-icon" style="background:rgba(168,85,247,0.12);color:var(--purple)">⟳</div>
+        <div class="bm-info">
+          <div class="bm-label">Selection Threshold</div>
+          <div class="bm-value" id="threshValue" style="color:var(--purple)">75%</div>
+          <div class="bm-bar"><div class="bm-fill" id="threshBar" style="background:var(--purple);width:75%"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Right: Agent Activity -->
+  <div class="panel">
+    <div class="panel-title">Agent Orchestration</div>
+    <div class="agent-list">
+      <div class="agent-card active" id="agentPerception">
+        <div class="agent-name"><div class="agent-dot"></div>Perception Agent</div>
+        <div class="agent-status" id="perceptionStatus">EEG + Gaze @ 30Hz</div>
+      </div>
+      <div class="agent-card" id="agentIntent">
+        <div class="agent-name"><div class="agent-dot"></div>Intent Agent</div>
+        <div class="agent-status" id="intentStatus">Monitoring element confidence</div>
+      </div>
+      <div class="agent-card" id="agentRL">
+        <div class="agent-name"><div class="agent-dot"></div>RL Bandit</div>
+        <div class="agent-status" id="rlStatus">LinUCB · Waiting for actions</div>
+      </div>
+      <div class="agent-card" id="agentImprove">
+        <div class="agent-name"><div class="agent-dot"></div>Self-Improvement</div>
+        <div class="agent-status" id="improveStatus">Checking every 30s</div>
+      </div>
+    </div>
+
+    <div class="action-log">
+      <div class="panel-title" style="margin-top:16px">Event Log</div>
+      <div id="logEntries"></div>
+    </div>
+  </div>
+
+  <!-- Bottom Left: RL Stats -->
+  <div class="panel">
+    <div class="panel-title">Reinforcement Learning</div>
+    <div class="rl-stats">
+      <div class="rl-stat">
+        <div class="rl-stat-value" id="rlActions" style="color:var(--cyan)">0</div>
+        <div class="rl-stat-label">Actions</div>
+      </div>
+      <div class="rl-stat">
+        <div class="rl-stat-value" id="rlReward" style="color:var(--green)">--</div>
+        <div class="rl-stat-label">Avg Reward</div>
+      </div>
+      <div class="rl-stat">
+        <div class="rl-stat-value" id="rlAccuracy" style="color:var(--purple)">--</div>
+        <div class="rl-stat-label">Accuracy</div>
+      </div>
+    </div>
+
+    <div class="threshold-viz">
+      <div style="font-size:11px;font-weight:600;margin-bottom:4px">Selection Threshold (adapting)</div>
+      <div class="thresh-bar">
+        <div class="thresh-fill" id="threshFill" style="width:75%"></div>
+        <div class="thresh-marker" id="threshMarker" style="left:75%"></div>
+      </div>
+      <div class="thresh-labels"><span>Easy (0.5)</span><span>Current</span><span>Hard (0.95)</span></div>
+    </div>
+
+    <div style="margin-top:16px">
+      <div class="panel-title">Neural Reward Signal</div>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:8px">
+        r = 0.7 × (1 - ErrP) + 0.3 × Δengagement
+      </div>
+      <div id="rewardHistory" style="display:flex;gap:3px;align-items:end;height:50px"></div>
+    </div>
+  </div>
+
+  <!-- Bottom Right: Element Map -->
+  <div class="panel">
+    <div class="panel-title">Element Map · <span id="mapLabel">--</span></div>
+    <div class="element-map" id="elementMap">
+      <div class="map-gaze" id="mapGaze"></div>
+    </div>
+
+    <div style="margin-top:16px">
+      <div class="panel-title">Pinned Element</div>
+      <div id="pinnedInfo" style="font-size:13px;font-weight:600;color:var(--dim)">None</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-left">
+      <div class="footer-metric"><div class="footer-dot" id="fDotWs" style="background:var(--red)"></div>WebSocket</div>
+      <div class="footer-metric"><div class="footer-dot" id="fDotEeg" style="background:var(--dim)"></div>EEG</div>
+      <div class="footer-metric"><div class="footer-dot" id="fDotRedis" style="background:var(--dim)"></div>Redis</div>
+      <div class="footer-metric"><div class="footer-dot" id="fDotWeave" style="background:var(--dim)"></div>Weave</div>
+    </div>
+    <div id="footerSession">--</div>
+  </div>
+</div>
+
+<script>
+let rewardBars = [];
+
+function addLog(msg, type='') {
+  const log = document.getElementById('logEntries');
+  const now = new Date();
+  const ts = now.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const entry = document.createElement('div');
+  entry.className = 'log-entry ' + type;
+  entry.innerHTML = `<span class="log-time">${ts}</span>${msg}`;
+  log.insertBefore(entry, log.firstChild);
+  while (log.children.length > 20) log.removeChild(log.lastChild);
+}
+
+function updateRewardBar(reward) {
+  rewardBars.push(reward);
+  if (rewardBars.length > 40) rewardBars.shift();
+  const container = document.getElementById('rewardHistory');
+  container.innerHTML = '';
+  rewardBars.forEach(r => {
+    const bar = document.createElement('div');
+    const h = Math.abs(r) * 40;
+    bar.style.cssText = `width:6px;height:${Math.max(2,h)}px;border-radius:2px;
+      background:${r > 0 ? 'var(--green)' : 'var(--red)'};opacity:${0.4+Math.abs(r)*0.6}`;
+    container.appendChild(bar);
+  });
+}
+
+let ws;
+function connect() {
+  ws = new WebSocket('ws://127.0.0.1:8091');
+  ws.onopen = () => {
+    document.getElementById('fDotWs').style.background = 'var(--green)';
+    addLog('Dashboard connected', 'select');
+  };
+  ws.onclose = () => {
+    document.getElementById('fDotWs').style.background = 'var(--red)';
+    setTimeout(connect, 2000);
+  };
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    if (d.type === 'init' || d.type === 'cal_ack' || d.type === 'cal_complete') return;
+    if (d.type !== 'state') return;
+
+    // Engagement
+    const eng = d.engagement;
+    if (eng != null) {
+      const pct = Math.min(eng * 100, 999);
+      document.getElementById('engValue').textContent = pct.toFixed(0) + '%';
+      document.getElementById('engBar').style.width = Math.min(pct, 100) + '%';
+      document.getElementById('fDotEeg').style.background = 'var(--green)';
+      document.getElementById('pillEeg').textContent = 'EEG ● LIVE';
+
+      document.getElementById('perceptionStatus').textContent =
+        `EEG: ${pct.toFixed(0)}% · Gaze: (${d.gaze_x}, ${d.gaze_y})`;
+    }
+
+    // Threshold
+    const thresh = d.threshold || 0.75;
+    document.getElementById('threshValue').textContent = (thresh * 100).toFixed(0) + '%';
+    document.getElementById('threshBar').style.width = (thresh * 100) + '%';
+    const threshPct = ((thresh - 0.5) / 0.45) * 100;
+    document.getElementById('threshFill').style.width = Math.min(100, threshPct) + '%';
+    document.getElementById('threshMarker').style.left = Math.min(98, threshPct) + '%';
+
+    // Actions
+    document.getElementById('rlActions').textContent = d.action_count || 0;
+    document.getElementById('rlStatus').textContent =
+      `LinUCB · ${d.action_count || 0} updates · reward: ${(d.bandit_avg_reward || 0).toFixed(2)}`;
+
+    if (d.bandit_avg_reward != null) {
+      document.getElementById('rlReward').textContent = (d.bandit_avg_reward).toFixed(2);
+      document.getElementById('rlReward').style.color =
+        d.bandit_avg_reward > 0 ? 'var(--green)' : 'var(--red)';
+    }
+
+    // Elements + confidence
+    const topEl = Object.entries(d.elements || {}).sort((a,b) => b[1].confidence - a[1].confidence)[0];
+    if (topEl && topEl[1].pinned) {
+      const conf = topEl[1].confidence;
+      document.getElementById('confValue').textContent = (conf * 100).toFixed(0) + '%';
+      document.getElementById('confBar').style.width = (conf * 100) + '%';
+      document.getElementById('pinnedInfo').textContent = topEl[0];
+      document.getElementById('pinnedInfo').style.color = conf > 0.5 ? 'var(--green)' : 'var(--text)';
+
+      document.getElementById('agentIntent').classList.add('active');
+      document.getElementById('intentStatus').textContent =
+        `Pinned: ${topEl[0]} · ${(conf*100).toFixed(0)}% confidence`;
+    } else {
+      document.getElementById('confValue').textContent = '0%';
+      document.getElementById('confBar').style.width = '0';
+      document.getElementById('pinnedInfo').textContent = 'None';
+      document.getElementById('pinnedInfo').style.color = 'var(--dim)';
+      document.getElementById('agentIntent').classList.remove('active');
+      document.getElementById('intentStatus').textContent = 'Monitoring...';
+    }
+
+    // Element map
+    const map = document.getElementById('elementMap');
+    const mapW = map.clientWidth;
+    const mapH = map.clientHeight;
+    // Remove old elements (keep gaze dot)
+    map.querySelectorAll('.map-el').forEach(e => e.remove());
+    // Screen bounds from element positions
+    let minX=9999, maxX=0, minY=9999, maxY=0;
+    Object.values(d.elements||{}).forEach(el => {
+      // We don't have absolute coords in the state, use relative
+    });
+    // Draw elements proportionally
+    const elArr = Object.entries(d.elements || {});
+    if (elArr.length > 0) {
+      const cols = elArr.length <= 2 ? 2 : 4;
+      const rows = Math.ceil(elArr.length / cols);
+      elArr.forEach(([id, el], i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const ew = mapW / cols - 8;
+        const eh = mapH / rows - 8;
+        const ex = col * (mapW / cols) + 4;
+        const ey = row * (mapH / rows) + 4;
+        const div = document.createElement('div');
+        div.className = 'map-el' + (el.pinned ? (el.confidence > 0.55 ? ' locked' : ' pinned') : '');
+        div.style.cssText = `left:${ex}px;top:${ey}px;width:${ew}px;height:${eh}px`;
+        div.textContent = id;
+        map.appendChild(div);
+      });
+    }
+    document.getElementById('mapLabel').textContent = `${elArr.length} elements`;
+
+    // Selection event
+    if (d.selected) {
+      addLog(`SELECTED: ${d.selected} (eng=${eng?.toFixed(2) || '--'})`, 'select');
+      document.getElementById('agentRL').classList.add('active');
+      setTimeout(() => document.getElementById('agentRL').classList.remove('active'), 2000);
+      updateRewardBar(d.bandit_avg_reward || 0.5);
+
+      // Flash accuracy estimate
+      if (d.action_count > 0 && d.bandit_avg_reward != null) {
+        const acc = Math.max(0, Math.min(100, 50 + d.bandit_avg_reward * 50));
+        document.getElementById('rlAccuracy').textContent = acc.toFixed(0) + '%';
+      }
+    }
+
+    // Session info
+    if (d.session_id) {
+      document.getElementById('footerSession').textContent = d.session_id;
+    }
+    if (d.has_redis) {
+      document.getElementById('fDotRedis').style.background = 'var(--green)';
+    }
+  };
+}
+
+addLog('Dashboard initializing...', '');
+connect();
+
+// Simulate self-improvement agent activity
+setInterval(() => {
+  document.getElementById('agentImprove').classList.add('active');
+  document.getElementById('improveStatus').textContent = 'Analyzing reward history...';
+  setTimeout(() => {
+    document.getElementById('agentImprove').classList.remove('active');
+    document.getElementById('improveStatus').textContent = 'Sleeping (checks every 30s)';
+  }, 2000);
+}, 30000);
+</script>
+</body>
+</html>
