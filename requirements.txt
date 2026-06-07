@@ -9,3 +9,6 @@ pyobjc-framework-Quartz>=12.0
 openai>=1.30
 weave>=0.50
 redis>=5.0
+anthropic>=0.39.0
+httpx>=0.27.0
+python-dotenv>=1.0.0

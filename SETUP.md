@@ -13,6 +13,28 @@ This guide explains how to set up and run the Axiom EEG project, which consists 
 - npm or yarn
 - Muse S headband (or run in simulation mode)
 
+## API Keys (Optional - for AI features)
+
+For the **Conversation Mode** feature with AI-generated responses and high-quality text-to-speech:
+
+### Anthropic (Claude AI)
+1. Get an API key from https://console.anthropic.com
+2. Set the environment variable:
+   ```bash
+   export ANTHROPIC_API_KEY="sk-ant-..."
+   ```
+
+### ElevenLabs (Text-to-Speech)
+1. Get an API key from https://elevenlabs.io
+2. Set the environment variable:
+   ```bash
+   export ELEVENLABS_API_KEY="..."
+   ```
+
+**Note:** If these API keys are not set, the system will fall back to:
+- Rule-based responses (instead of Claude)
+- Web Speech API (instead of ElevenLabs)
+
 ## Quick Start
 
 ### 1. Setup Python Environment
@@ -160,3 +182,28 @@ lsof -ti:8000 | xargs kill -9
 
 ### "Invalid step: baseline" error
 - Frontend/backend step IDs were mismatched - this should be fixed now
+
+## Conversation Mode
+
+The Conversation Mode (`/conversation`) allows a speaking person to communicate with an EEG user:
+
+### How It Works
+1. **Speaker speaks** - Click mic, speak, click "Done Speaking"
+2. **EEG reading** - System reads brain signals for 5 seconds
+3. **AI response** - Claude AI interprets cognitive state and generates response
+4. **Text-to-speech** - ElevenLabs speaks the response aloud
+5. **Repeat** - Turn-based conversation continues
+
+### Cognitive State Detection
+The system detects emotions from EEG signals:
+- **Valence** (positive/negative mood)
+- **Engagement** (attention level)
+- **Focus** (concentration)
+- **Relaxation** (calm state)
+
+These map to emotions: Happy, Calm, Sad, Stressed, Attentive, etc.
+
+### Running Without API Keys
+If you don't have API keys, the system works with:
+- **Rule-based responses** - Pre-written responses based on detected emotion
+- **Browser TTS** - Uses Web Speech API instead of ElevenLabs

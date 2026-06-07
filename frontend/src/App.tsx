@@ -3,6 +3,7 @@ import { LandingPage } from './pages/LandingPage';
 import { ConnectDevice } from './pages/ConnectDevice';
 import { Calibration } from './pages/Calibration';
 import { CommunicationHub } from './pages/CommunicationHub';
+import { ConversationMode } from './pages/ConversationMode';
 import { Settings } from './pages/Settings';
 import { LiveDecode } from './pages/LiveDecode';
 import { Dashboard } from './pages/Dashboard';
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/connect" element={<ConnectDevice />} />
         <Route path="/calibrate" element={<Calibration />} />
         <Route path="/communicate" element={<CommunicationHub />} />
+        <Route path="/conversation" element={<ConversationMode />} />
         <Route path="/decode" element={<LiveDecode />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/train" element={<TrainingMode />} />

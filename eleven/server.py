@@ -10,7 +10,12 @@ Provides:
 import asyncio
 import json
 import logging
+import os
 import time
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, asdict
 from typing import Optional, Set
@@ -18,7 +23,17 @@ from enum import Enum
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
+import httpx
+
+# Optional: Anthropic for Claude AI
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    anthropic = None
 
 from pathlib import Path
 
@@ -1055,6 +1070,379 @@ async def get_enhanced_calibration_steps():
             for s in EnhancedCalibrationSession.STEPS
         ]
     }
+
+
+# ============================================================================
+# Conversation / AI Response Endpoint
+# ============================================================================
+
+class ConversationMessage(BaseModel):
+    """A message in the conversation."""
+    sender: str  # 'speaker' or 'eeg_user'
+    text: str
+
+
+class CognitiveState(BaseModel):
+    """Cognitive state from EEG analysis."""
+    engagement: float = 0.5
+    focus: float = 0.5
+    relaxation: float = 0.5
+    cognitive_load: float = 0.5
+    valence: float = 0.5
+
+
+class GenerateResponseRequest(BaseModel):
+    """Request to generate an AI response based on EEG cognitive state."""
+    speaker_message: str
+    cognitive_state: CognitiveState
+    conversation_history: list[ConversationMessage] = []
+    eeg_user_name: str = "User"
+
+
+def detect_emotion(state: CognitiveState) -> str:
+    """Map cognitive state to emotion label."""
+    v = state.valence
+    e = state.engagement
+    r = state.relaxation
+    c = state.cognitive_load
+
+    # High valence states
+    if v > 0.6:
+        if e > 0.5:
+            return "Happy"
+        elif r > 0.6:
+            return "Calm"
+        else:
+            return "Content"
+
+    # Low valence states
+    elif v < 0.4:
+        if e > 0.6 and r < 0.4:
+            return "Frustrated"
+        elif c > 0.6:
+            return "Stressed"
+        elif r > 0.5:
+            return "Sad"
+        else:
+            return "Uncomfortable"
+
+    # Neutral valence
+    else:
+        if e > 0.5:
+            return "Attentive"
+        elif r > 0.7:
+            return "Tired"
+        elif c > 0.5:
+            return "Thinking"
+        else:
+            return "Neutral"
+
+
+def generate_response_from_state(
+    speaker_message: str,
+    emotion: str,
+    state: CognitiveState,
+    history: list[ConversationMessage],
+    user_name: str
+) -> str:
+    """Generate a contextual response based on detected emotion and conversation."""
+
+    # Response templates based on emotion
+    responses = {
+        "Happy": [
+            "I'm feeling good right now.",
+            "Things are going well, thank you for asking.",
+            "I'm in a positive mood today.",
+            "Yes, I'm doing great!",
+        ],
+        "Calm": [
+            "I'm feeling peaceful and relaxed.",
+            "Everything is fine, I'm comfortable.",
+            "I'm at ease right now.",
+            "I feel calm and content.",
+        ],
+        "Content": [
+            "I'm doing alright.",
+            "Things are okay.",
+            "I'm satisfied with how things are.",
+            "No complaints here.",
+        ],
+        "Frustrated": [
+            "I'm feeling a bit frustrated.",
+            "Something is bothering me.",
+            "I'm not entirely happy right now.",
+            "This is challenging for me.",
+        ],
+        "Stressed": [
+            "I'm feeling some pressure right now.",
+            "Things feel overwhelming.",
+            "I could use some help.",
+            "I'm stressed about something.",
+        ],
+        "Sad": [
+            "I'm feeling down.",
+            "Things could be better.",
+            "I'm not in the best mood.",
+            "I feel a bit sad.",
+        ],
+        "Uncomfortable": [
+            "I'm not feeling great.",
+            "Something doesn't feel right.",
+            "I'm a bit uncomfortable.",
+            "I'd like things to change.",
+        ],
+        "Attentive": [
+            "I'm listening carefully.",
+            "You have my full attention.",
+            "I'm focused on what you're saying.",
+            "I understand, please continue.",
+        ],
+        "Tired": [
+            "I'm feeling tired.",
+            "I could use some rest.",
+            "My energy is low right now.",
+            "I'm a bit drowsy.",
+        ],
+        "Thinking": [
+            "I'm processing that.",
+            "Let me think about it.",
+            "I'm considering what you said.",
+            "I need a moment to think.",
+        ],
+        "Neutral": [
+            "I'm doing okay.",
+            "Nothing particular to report.",
+            "Things are normal.",
+            "I'm fine.",
+        ],
+    }
+
+    # Context-aware response selection
+    msg_lower = speaker_message.lower()
+
+    # Check for specific questions
+    if any(q in msg_lower for q in ["how are you", "how do you feel", "how's it going", "are you okay"]):
+        return responses.get(emotion, responses["Neutral"])[0]
+
+    if any(q in msg_lower for q in ["need anything", "can i help", "want something"]):
+        if emotion in ["Stressed", "Frustrated", "Uncomfortable"]:
+            return "Yes, I could use some help."
+        elif emotion == "Tired":
+            return "I'd like to rest, please."
+        else:
+            return "I'm okay for now, thank you."
+
+    if any(q in msg_lower for q in ["yes or no", "do you want", "would you like", "should i"]):
+        if state.valence > 0.5:
+            return "Yes, please."
+        else:
+            return "No, thank you."
+
+    if any(q in msg_lower for q in ["understand", "got it", "makes sense"]):
+        if state.engagement > 0.5:
+            return "Yes, I understand."
+        else:
+            return "Could you explain more?"
+
+    # Default: return emotion-based response
+    import random
+    options = responses.get(emotion, responses["Neutral"])
+    return random.choice(options)
+
+
+@app.post("/api/generate-response")
+async def generate_response(request: GenerateResponseRequest):
+    """
+    Generate an AI response based on EEG cognitive state using Claude AI.
+
+    This endpoint analyzes the cognitive state from EEG signals and generates
+    a contextual response that the EEG user might want to communicate.
+    """
+    # Detect emotion from cognitive state
+    emotion = detect_emotion(request.cognitive_state)
+
+    # Check if Claude is available
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+    if ANTHROPIC_AVAILABLE and api_key:
+        # Use Claude AI for response generation
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+
+            # Build conversation context
+            conversation_context = ""
+            for msg in request.conversation_history[-5:]:  # Last 5 messages
+                role = "Speaker" if msg.sender == "speaker" else request.eeg_user_name
+                conversation_context += f"{role}: {msg.text}\n"
+
+            prompt = f"""You are helping a person with disabilities communicate through brain-computer interface (EEG).
+Based on their current cognitive/emotional state detected from EEG signals, generate a natural response they might want to say.
+
+Current EEG-detected state for {request.eeg_user_name}:
+- Emotional state: {emotion}
+- Engagement level: {request.cognitive_state.engagement:.0%}
+- Focus level: {request.cognitive_state.focus:.0%}
+- Relaxation level: {request.cognitive_state.relaxation:.0%}
+- Emotional valence (positive/negative): {request.cognitive_state.valence:.0%}
+
+Recent conversation:
+{conversation_context}
+Speaker just said: "{request.speaker_message}"
+
+Generate a brief, natural response (1-2 sentences) that {request.eeg_user_name} would likely want to say based on their detected emotional state.
+The response should feel authentic and match the emotional tone detected.
+Only output the response text, nothing else."""
+
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=150,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            response_text = message.content[0].text.strip()
+            logger.info(f"Claude generated response: {response_text}")
+
+        except Exception as e:
+            logger.error(f"Claude API error: {e}")
+            # Fallback to rule-based
+            response_text = generate_response_from_state(
+                speaker_message=request.speaker_message,
+                emotion=emotion,
+                state=request.cognitive_state,
+                history=request.conversation_history,
+                user_name=request.eeg_user_name
+            )
+    else:
+        # Fallback to rule-based response
+        response_text = generate_response_from_state(
+            speaker_message=request.speaker_message,
+            emotion=emotion,
+            state=request.cognitive_state,
+            history=request.conversation_history,
+            user_name=request.eeg_user_name
+        )
+
+    return {
+        "response": response_text,
+        "emotion": emotion,
+        "cognitive_state": {
+            "engagement": request.cognitive_state.engagement,
+            "focus": request.cognitive_state.focus,
+            "relaxation": request.cognitive_state.relaxation,
+            "valence": request.cognitive_state.valence,
+        }
+    }
+
+
+# ============================================================================
+# Text-to-Speech (ElevenLabs) Endpoint
+# ============================================================================
+
+class TTSRequest(BaseModel):
+    """Request for text-to-speech conversion."""
+    text: str
+    voice_id: str = "21m00Tcm4TlvDq8ikWAM"  # Default: Rachel voice
+
+
+@app.post("/api/text-to-speech")
+async def text_to_speech(request: TTSRequest):
+    """
+    Convert text to speech using ElevenLabs API.
+
+    Returns audio as MP3 bytes.
+    """
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY environment variable."
+        )
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{request.voice_id}",
+                headers={
+                    "xi-api-key": api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "text": request.text,
+                    "model_id": "eleven_monolingual_v1",
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.75,
+                    }
+                },
+                timeout=30.0
+            )
+
+            if response.status_code != 200:
+                logger.error(f"ElevenLabs API error: {response.status_code} - {response.text}")
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"ElevenLabs API error: {response.text}"
+                )
+
+            # Return audio as MP3
+            return Response(
+                content=response.content,
+                media_type="audio/mpeg",
+                headers={"Content-Disposition": "inline; filename=speech.mp3"}
+            )
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="ElevenLabs API timeout")
+    except Exception as e:
+        logger.error(f"TTS error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/voices")
+async def get_voices():
+    """
+    Get available ElevenLabs voices.
+    """
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+
+    if not api_key:
+        # Return default voices without API
+        return {
+            "voices": [
+                {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel (Default)"},
+                {"voice_id": "AZnzlk1XvdvUeBnXmlld", "name": "Domi"},
+                {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Bella"},
+                {"voice_id": "MF3mGyEYCl7XYWbV9V6O", "name": "Elli"},
+                {"voice_id": "TxGEqnHWrfWFTfGW9XjX", "name": "Josh"},
+                {"voice_id": "VR6AewLTigWG4xSOukaG", "name": "Arnold"},
+                {"voice_id": "pNInz6obpgDQGcFmaJgB", "name": "Adam"},
+                {"voice_id": "yoZ06aMxZJJ28mfd3POQ", "name": "Sam"},
+            ]
+        }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.elevenlabs.io/v1/voices",
+                headers={"xi-api-key": api_key},
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "voices": [
+                        {"voice_id": v["voice_id"], "name": v["name"]}
+                        for v in data.get("voices", [])
+                    ]
+                }
+            else:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch voices")
+
+    except Exception as e:
+        logger.error(f"Error fetching voices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
