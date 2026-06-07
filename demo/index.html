@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AXIOM · Mind-Controlled Netflix</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #141420;
+    --card: #1a1a2e;
+    --border: #2a2a40;
+    --text: #e0e0f0;
+    --dim: #6a6a8a;
+    --accent: #e50914;
+    --glow: rgba(229, 9, 20, 0.4);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    cursor: none;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 40px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%);
+    position: relative;
+    z-index: 10;
+  }
+  .logo {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: 2px;
+  }
+  .logo span { color: var(--text); font-weight: 400; font-size: 14px; letter-spacing: 0; margin-left: 12px; }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--dim);
+  }
+  .eeg-bar {
+    width: 120px;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .eeg-fill {
+    height: 100%;
+    background: #00ff88;
+    border-radius: 3px;
+    transition: width 0.2s ease;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #00ff88;
+    box-shadow: 0 0 6px #00ff8880;
+  }
+
+  /* ── Hero ── */
+  .hero {
+    padding: 20px 40px 30px;
+  }
+  .hero h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .hero p {
+    font-size: 13px;
+    color: #4a4a6a;
+  }
+
+  /* ── Card Grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    padding: 0 40px;
+    max-width: 1400px;
+  }
+
+  .card {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    aspect-ratio: 16/10;
+    background: var(--card);
+    border: 2px solid transparent;
+    transition: transform 0.2s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    cursor: none;
+  }
+
+  .card-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .card-gradient {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60%;
+    background: linear-gradient(transparent, rgba(0,0,0,0.85));
+  }
+
+  .card-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 16px;
+  }
+  .card-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .card-meta {
+    font-size: 11px;
+    color: var(--dim);
+  }
+
+  /* ── Gaze states ── */
+  .card.gaze-hover {
+    border-color: rgba(255, 255, 255, 0.25);
+    transform: scale(1.03);
+  }
+
+  .card.gaze-focus {
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: scale(1.05);
+    box-shadow: 0 0 30px rgba(255, 255, 255, 0.1);
+  }
+
+  .card.gaze-locked {
+    border-color: var(--accent);
+    transform: scale(1.06);
+    box-shadow: 0 0 40px var(--glow), 0 0 80px rgba(229, 9, 20, 0.15);
+  }
+
+  .card.gaze-selected {
+    border-color: #00ff88;
+    transform: scale(1.08);
+    box-shadow: 0 0 60px rgba(0, 255, 136, 0.3);
+  }
+
+  /* ── Confidence ring ── */
+  .ring-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  .card.gaze-focus .ring-container,
+  .card.gaze-locked .ring-container {
+    opacity: 1;
+  }
+  .ring-bg {
+    fill: none;
+    stroke: rgba(255,255,255,0.15);
+    stroke-width: 3;
+  }
+  .ring-fg {
+    fill: none;
+    stroke: white;
+    stroke-width: 4;
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: center;
+    transition: stroke-dashoffset 0.1s ease, stroke 0.2s;
+  }
+  .card.gaze-locked .ring-fg {
+    stroke: var(--accent);
+    filter: drop-shadow(0 0 6px var(--glow));
+  }
+  .ring-pct {
+    fill: white;
+    font-size: 14px;
+    font-weight: 700;
+    font-family: 'Inter', sans-serif;
+    text-anchor: middle;
+    dominant-baseline: central;
+  }
+
+  /* ── Gaze dot ── */
+  .gaze-dot {
+    position: fixed;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(0, 180, 255, 0.6);
+    border: 2px solid rgba(255,255,255,0.5);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 1000;
+    transition: left 0.05s ease, top 0.05s ease;
+  }
+
+  /* ── Selection flash overlay ── */
+  .flash {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 255, 136, 0.08);
+    z-index: 999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  .flash.active { opacity: 1; }
+
+  /* ── Now Playing bar ── */
+  .now-playing {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 40px;
+    gap: 16px;
+    z-index: 10;
+  }
+  .np-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    flex: 1;
+  }
+  .np-status {
+    font-size: 12px;
+    color: var(--dim);
+  }
+  .np-empty {
+    font-size: 13px;
+    color: #3a3a5a;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="flash" id="flash"></div>
+<div class="gaze-dot" id="gazeDot"></div>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">AXIOM<span>mind-controlled streaming</span></div>
+  <div class="header-right">
+    <span id="engLabel">Engagement: --</span>
+    <div class="eeg-bar"><div class="eeg-fill" id="eegFill" style="width: 50%"></div></div>
+    <div class="status-dot" id="statusDot"></div>
+  </div>
+</div>
+
+<!-- Hero -->
+<div class="hero">
+  <h2>Trending Now</h2>
+  <p>Look at a title. Focus to select it.</p>
+</div>
+
+<!-- Card Grid -->
+<div class="grid" id="grid"></div>
+
+<!-- Now Playing -->
+<div class="now-playing">
+  <div class="np-title" id="npTitle"><span class="np-empty">Nothing playing — select a title with your gaze</span></div>
+  <div class="np-status" id="npStatus"></div>
+</div>
+
+<script>
+const MOVIES = [
+  { id: "m1", title: "Neural Drift", year: "2026", rating: "TV-MA", color: "#1a0a2e" },
+  { id: "m2", title: "The Last Signal", year: "2025", rating: "PG-13", color: "#0a1a2e" },
+  { id: "m3", title: "Cortex", year: "2026", rating: "R", color: "#2e1a0a" },
+  { id: "m4", title: "Mind Gate", year: "2024", rating: "TV-14", color: "#0a2e1a" },
+  { id: "m5", title: "Brainwave", year: "2026", rating: "PG-13", color: "#2e0a1a" },
+  { id: "m6", title: "Synaptic", year: "2025", rating: "TV-MA", color: "#1a2e0a" },
+  { id: "m7", title: "The Interface", year: "2026", rating: "R", color: "#0a0a2e" },
+  { id: "m8", title: "Echo Protocol", year: "2024", rating: "TV-14", color: "#2e2e0a" },
+];
+
+const CIRC = 2 * Math.PI * 28;
+
+// Build cards
+const grid = document.getElementById('grid');
+MOVIES.forEach(m => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.id = m.id;
+  card.dataset.title = m.title;
+  card.innerHTML = `
+    <div style="width:100%;height:100%;background:linear-gradient(135deg, ${m.color}, ${m.color}dd, #0a0a15);"></div>
+    <div class="card-gradient"></div>
+    <div class="card-info">
+      <div class="card-title">${m.title}</div>
+      <div class="card-meta">${m.year} · ${m.rating}</div>
+    </div>
+    <div class="ring-container">
+      <svg width="70" height="70" viewBox="0 0 70 70">
+        <circle class="ring-bg" cx="35" cy="35" r="28"/>
+        <circle class="ring-fg" cx="35" cy="35" r="28"
+          stroke-dasharray="${CIRC}"
+          stroke-dashoffset="${CIRC}"/>
+        <text class="ring-pct" x="35" y="35">0%</text>
+      </svg>
+    </div>
+  `;
+  grid.appendChild(card);
+});
+
+// Register element positions with the Python server
+function registerElements() {
+  const elements = [];
+  document.querySelectorAll('.card').forEach(card => {
+    const r = card.getBoundingClientRect();
+    elements.push({
+      id: card.id,
+      x: Math.round(r.left),
+      y: Math.round(r.top),
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+    });
+  });
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'register_elements', elements }));
+  }
+}
+
+// WebSocket
+let ws;
+function connect() {
+  ws = new WebSocket('ws://127.0.0.1:8091');
+  ws.onopen = () => {
+    document.getElementById('statusDot').style.background = '#00ff88';
+    setTimeout(registerElements, 500);
+    // Re-register on resize
+    window.addEventListener('resize', () => setTimeout(registerElements, 300));
+  };
+  ws.onclose = () => {
+    document.getElementById('statusDot').style.background = '#ff4444';
+    setTimeout(connect, 2000);
+  };
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    if (d.type !== 'state') return;
+
+    // Gaze dot
+    const dot = document.getElementById('gazeDot');
+    dot.style.left = d.gaze_x + 'px';
+    dot.style.top = d.gaze_y + 'px';
+
+    // Engagement
+    const eng = d.engagement;
+    document.getElementById('engLabel').textContent = `Engagement: ${(eng * 100).toFixed(0)}%`;
+    document.getElementById('eegFill').style.width = (eng * 100) + '%';
+    document.getElementById('eegFill').style.background = eng > 0.6 ? '#00ff88' : '#00aaff';
+
+    // Element states
+    document.querySelectorAll('.card').forEach(card => {
+      const elState = d.elements[card.id];
+      card.classList.remove('gaze-hover', 'gaze-focus', 'gaze-locked', 'gaze-selected');
+
+      if (!elState) return;
+      const c = elState.confidence;
+
+      if (c >= 0.65) {
+        card.classList.add('gaze-locked');
+      } else if (c >= 0.35) {
+        card.classList.add('gaze-focus');
+      } else if (c >= 0.15) {
+        card.classList.add('gaze-hover');
+      }
+
+      // Update ring
+      const ring = card.querySelector('.ring-fg');
+      const pct = card.querySelector('.ring-pct');
+      if (ring && c >= 0.15) {
+        const progress = Math.min(1, c / 0.75);
+        ring.setAttribute('stroke-dashoffset', CIRC * (1 - progress));
+        pct.textContent = Math.round(c * 100) + '%';
+      } else if (ring) {
+        ring.setAttribute('stroke-dashoffset', CIRC);
+        pct.textContent = '';
+      }
+    });
+
+    // Selection
+    if (d.selected) {
+      const card = document.getElementById(d.selected);
+      if (card) {
+        card.classList.add('gaze-selected');
+        const title = card.dataset.title;
+        document.getElementById('npTitle').textContent = '▶ Now Playing: ' + title;
+        document.getElementById('npStatus').textContent = 'Selected via gaze + focus';
+
+        // Flash
+        const flash = document.getElementById('flash');
+        flash.classList.add('active');
+        setTimeout(() => flash.classList.remove('active'), 400);
+
+        // Reset ring after a moment
+        setTimeout(() => {
+          card.classList.remove('gaze-selected');
+        }, 2000);
+      }
+    }
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
