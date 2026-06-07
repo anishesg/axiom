@@ -274,8 +274,11 @@
 <div class="header">
   <div class="logo">AXIOM<span>mind-controlled streaming</span></div>
   <div class="header-right">
+    <span id="personaLabel" style="font-size:10px;padding:3px 8px;border-radius:3px;background:#1a1a2e;color:#6a6a8a;letter-spacing:1px;text-transform:uppercase;">--</span>
     <span id="engLabel">Engagement: --</span>
     <div class="eeg-bar"><div class="eeg-fill" id="eegFill" style="width: 50%"></div></div>
+    <span id="rlLabel" style="font-size:10px;color:#6a6a8a;">RL: --</span>
+    <span id="threshLabel" style="font-size:10px;color:#6a6a8a;">θ: --</span>
     <div class="status-dot" id="statusDot"></div>
   </div>
 </div>
@@ -343,6 +346,7 @@ function registerElements() {
     const r = card.getBoundingClientRect();
     elements.push({
       id: card.id,
+      label: card.dataset.title || card.id,
       x: Math.round(r.left),
       y: Math.round(r.top),
       w: Math.round(r.width),
@@ -350,7 +354,11 @@ function registerElements() {
     });
   });
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'register_elements', elements }));
+    ws.send(JSON.stringify({
+      type: 'register_elements',
+      elements,
+      page_title: document.title,
+    }));
   }
 }
 
@@ -377,11 +385,21 @@ function connect() {
     dot.style.left = d.gaze_x + 'px';
     dot.style.top = d.gaze_y + 'px';
 
-    // Engagement
+    // Engagement + brain persona + RL stats
     const eng = d.engagement;
     document.getElementById('engLabel').textContent = `Engagement: ${(eng * 100).toFixed(0)}%`;
     document.getElementById('eegFill').style.width = (eng * 100) + '%';
     document.getElementById('eegFill').style.background = eng > 0.6 ? '#00ff88' : '#00aaff';
+
+    const personaColors = {focused:'#00ff88', browsing:'#00aaff', deciding:'#ffaa00', confused:'#ff4444'};
+    const pl = document.getElementById('personaLabel');
+    pl.textContent = d.brain_persona || '--';
+    pl.style.color = personaColors[d.brain_persona] || '#6a6a8a';
+    pl.style.borderColor = personaColors[d.brain_persona] || '#2a2a40';
+    pl.style.border = '1px solid';
+
+    document.getElementById('rlLabel').textContent = `RL: ${(d.bandit_avg_reward || 0).toFixed(2)}`;
+    document.getElementById('threshLabel').textContent = `θ: ${(d.threshold || 0.75).toFixed(2)}`;
 
     // Element states
     document.querySelectorAll('.card').forEach(card => {

@@ -256,8 +256,9 @@ ws_clients = set()
 
 def gaze_thread_fn(cam_idx, gaze_estimator, eeg):
     """Runs gaze tracking + EEG in a background thread at ~30Hz."""
-    filter_x = OneEuroFilter(min_cutoff=0.5, beta=0.02)
-    filter_y = OneEuroFilter(min_cutoff=0.4, beta=0.01)
+    # v1 settings that worked "beautifully" — don't over-tune
+    filter_x = OneEuroFilter(min_cutoff=0.8, beta=0.008)
+    filter_y = OneEuroFilter(min_cutoff=0.8, beta=0.008)
     eng_history = deque(maxlen=15)
 
     cap = cv2.VideoCapture(cam_idx)
