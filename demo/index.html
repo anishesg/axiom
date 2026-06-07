@@ -9,7 +9,7 @@
   :root { --bg:#0a0a0f; --surface:#141420; --card:#1a1a2e; --border:#2a2a40;
           --text:#e0e0f0; --dim:#6a6a8a; --accent:#e50914; }
   body { background:var(--bg); color:var(--text); font-family:'Inter',sans-serif;
-         height:100vh; overflow:hidden; cursor:none; }
+         height:100vh; overflow:hidden; }
 
   .header { display:flex; align-items:center; justify-content:space-between;
             padding:14px 40px; background:linear-gradient(180deg,rgba(0,0,0,0.8),transparent);
@@ -51,7 +51,7 @@
   .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:20px; padding:0 40px; }
   .card { position:relative; border-radius:12px; overflow:hidden; aspect-ratio:16/10;
           background:var(--card); border:2px solid transparent;
-          transition:transform 0.25s,border-color 0.3s,box-shadow 0.3s; cursor:none; }
+          transition:transform 0.25s,border-color 0.3s,box-shadow 0.3s; cursor:pointer; }
   .card-gradient { position:absolute; bottom:0; left:0; right:0; height:65%;
                    background:linear-gradient(transparent,rgba(0,0,0,0.9)); }
   .card-info { position:absolute; bottom:0; left:0; right:0; padding:14px; }
@@ -85,7 +85,7 @@
   .player-controls { padding:14px 40px; background:var(--surface); display:flex;
                      align-items:center; gap:16px; border-top:1px solid var(--border); }
   .ctrl-btn { padding:10px 24px; border-radius:8px; border:none; font-family:'Inter';
-              font-size:13px; font-weight:600; cursor:none; transition:all 0.2s; }
+              font-size:13px; font-weight:600; cursor:pointer; transition:all 0.2s; }
   .ctrl-btn.primary { background:var(--accent); color:white; }
   .ctrl-btn.secondary { background:var(--border); color:var(--text); }
   .ctrl-btn.pinned { transform:scale(1.05); box-shadow:0 0 15px rgba(255,255,255,0.1); }
