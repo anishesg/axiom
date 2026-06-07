@@ -928,6 +928,85 @@ def start_http_server():
 
 
 # ═════════════════════════════════════════════════════════════
+# NETFLIX-MAPPED CALIBRATION
+# ═════════════════════════════════════════════════════════════
+
+def run_netflix_calibration(gaze_estimator, camera_index, sw, sh):
+    """Two-phase calibration mapped to Netflix UI layout.
+
+    Phase 1: 4 corners + center for general coverage (5 points)
+    Phase 2: 8 points at exact card centers + 2 at control button positions
+             + 4 between cards for interpolation (14 points)
+
+    Total: 19 points, all in regions that actually matter.
+    """
+    from eyetrax.calibration.common import wait_for_face_and_countdown, _pulse_and_capture
+
+    cap = cv2.VideoCapture(camera_index)
+
+    # Wait for face
+    if not wait_for_face_and_countdown(cap, gaze_estimator, sw, sh, 2):
+        cap.release()
+        cv2.destroyAllWindows()
+        return
+
+    margin = 0.08
+    # Phase 1: corners + center (general spatial coverage)
+    phase1_pts = [
+        (int(sw * 0.5), int(sh * 0.5)),      # center
+        (int(sw * margin), int(sh * margin)),  # top-left
+        (int(sw * (1 - margin)), int(sh * margin)),  # top-right
+        (int(sw * margin), int(sh * (1 - margin))),  # bottom-left
+        (int(sw * (1 - margin)), int(sh * (1 - margin))),  # bottom-right
+    ]
+
+    # Phase 2: Netflix card grid positions (4 cols × 2 rows)
+    # Cards start at ~y=120, with padding=40px on each side, gap=20px
+    # This matches the CSS grid in index.html
+    grid_left = 40
+    grid_gap = 20
+    card_w = (sw - 2 * grid_left - 3 * grid_gap) // 4
+    card_h = int(card_w * 10 / 16)  # aspect ratio 16:10
+
+    row1_y = 120 + card_h // 2   # center of top row cards
+    row2_y = 120 + card_h + grid_gap + card_h // 2  # center of bottom row cards
+
+    phase2_pts = []
+    for col in range(4):
+        cx = grid_left + col * (card_w + grid_gap) + card_w // 2
+        phase2_pts.append((cx, row1_y))  # top row card center
+        phase2_pts.append((cx, row2_y))  # bottom row card center
+
+    # Between-card interpolation points (between col 1-2 and col 2-3)
+    for col in [1, 2]:
+        cx = grid_left + col * (card_w + grid_gap) - grid_gap // 2
+        phase2_pts.append((cx, row1_y))
+        phase2_pts.append((cx, row2_y))
+
+    # Player control positions (bottom of screen)
+    phase2_pts.append((int(sw * 0.15), int(sh * 0.88)))  # Play button area
+    phase2_pts.append((int(sw * 0.40), int(sh * 0.88)))  # Back button area
+
+    all_pts = phase1_pts + phase2_pts
+
+    print(f"  Phase 1: {len(phase1_pts)} coverage points")
+    print(f"  Phase 2: {len(phase2_pts)} Netflix-mapped points")
+    print(f"  Total: {len(all_pts)} calibration points")
+
+    result = _pulse_and_capture(gaze_estimator, cap, all_pts, sw, sh,
+                                 pulse_d=0.8, cd_d=1.0)
+    cap.release()
+    cv2.destroyAllWindows()
+
+    if result is None:
+        return
+    feats, targs = result
+    if feats:
+        gaze_estimator.train(np.array(feats), np.array(targs))
+        print(f"  Trained on {len(feats)} samples across {len(all_pts)} points")
+
+
+# ═════════════════════════════════════════════════════════════
 # MAIN
 # ═════════════════════════════════════════════════════════════
 
@@ -965,9 +1044,9 @@ async def main():
 
     gaze = GazeEstimator(model_name="tiny_mlp")
     print("\n=== GAZE CALIBRATION ===")
+    print("  Calibration points are mapped to the Netflix card layout.")
     print("  Keep window focused. Move head slightly between dots.")
-    run_dense_grid_calibration(gaze, rows=5, cols=5, order="serpentine",
-                                pulse_d=1.0, cd_d=1.0, camera_index=cam_idx)
+    run_netflix_calibration(gaze, cam_idx, sw, sh)
     print("  Done.\n")
 
     # Start HTTP server
