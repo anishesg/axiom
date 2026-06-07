@@ -1,25 +1,18 @@
 #!/usr/bin/env python3
-"""AXIOM — Brain-controlled web interaction via multi-agent orchestration.
+"""AXIOM — Brain-controlled web interaction.
 
-Architecture:
-  Tier 1 (pure math, 20Hz):
-    PerceptionAgent: EEG → engagement/focus/errp, Gaze → screen position
-    IntentAgent: fuse signals → per-element confidence → threshold check
+Simple, effective architecture:
+  - Webcam → eyetrax features (continuous, 30Hz)
+  - Browser-based calibration (dots on the actual Netflix layout)
+  - Nearest-element highlight with sticky pinning
+  - EEG engagement boosts selection confidence
+  - LinUCB bandit learns from neural reward
 
-  Tier 2 (LLM-powered, async):
-    PageAgent: OpenAI → classify DOM into semantic zones (on page load)
-    SelfImprovementAgent: Weave feedback → threshold tuning (every 30s)
-
-  Core RL loop:
-    LinUCB contextual bandit with neural reward:
-      r = 0.7 × errp_signal + 0.3 × engagement_delta
-
-  NeuroLLM:
-    Brain state → LLM temperature + prompt persona injection
+No OpenCV UI. No coordinate mismatch. Calibration IS the Netflix page.
 
 Usage:
     python3 axiom.py              # full system
-    python3 axiom.py --no-eeg     # gaze only, simulated engagement
+    python3 axiom.py --no-eeg     # gaze only
 """
 
 import asyncio
@@ -30,22 +23,16 @@ import sys
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
-from enum import Enum
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 import numpy as np
-import redis
-import weave
 import websockets
-
-# ── Gaze ──
-from eyetrax import GazeEstimator
-from eyetrax.calibration import run_dense_grid_calibration
-from screeninfo import get_monitors
 import cv2
 
-# ── EEG ──
+from eyetrax import GazeEstimator
+from screeninfo import get_monitors
+
+# ── EEG (optional) ──
 USE_EEG = "--no-eeg" not in sys.argv
 if USE_EEG:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
@@ -62,159 +49,20 @@ if USE_EEG:
         NoiseTypes, WindowOperations,
     )
 
-# ── OpenAI ──
-from openai import OpenAI
-oai_client = OpenAI()  # reads OPENAI_API_KEY from env
-
-
-# ═════════════════════════════════════════════════════════════
-# WEAVE INIT
-# ═════════════════════════════════════════════════════════════
-
+# ── Weave (optional) ──
 try:
+    import weave
     weave.init("axiom-bci")
-    HAS_WEAVE = True
     print("[WEAVE] Connected", flush=True)
-except Exception as e:
-    HAS_WEAVE = False
-    print(f"[WEAVE] Not available ({e}), continuing without tracing", flush=True)
-    # Make weave.op a no-op decorator
-    _real_weave_op = weave.op
-    weave.op = lambda f=None, **kw: f if f else (lambda fn: fn)
-
-
-# ═════════════════════════════════════════════════════════════
-# REDIS — real-time nervous system
-# ═════════════════════════════════════════════════════════════
-
-try:
-    rdb = redis.Redis(host="127.0.0.1", port=6379, decode_responses=True)
-    rdb.ping()
-    HAS_REDIS = True
-    print("[REDIS] Connected", flush=True)
 except Exception:
-    rdb = None
-    HAS_REDIS = False
-    print("[REDIS] Not available, continuing without", flush=True)
+    pass
 
-SESSION_ID = f"session:{int(time.time())}"
-
-
-class RedisBrainBus:
-    """Streams brain state to Redis for multi-agent consumption.
-    Tracks rolling engagement baseline for drift detection."""
-
-    def __init__(self):
-        if not HAS_REDIS:
-            return
-        # Stream for real-time brain state fan-out
-        self.stream_key = f"stream:brain:{SESSION_ID}"
-        # Rolling engagement baseline (5-minute buckets)
-        self.baseline_key = f"baseline:engagement:{SESSION_ID}"
-        self.baseline_values = []
-        self.baseline_window = 300  # 5 minutes
-        self.last_baseline_update = time.time()
-        # Session memory
-        self.session_key = f"session:memory:{SESSION_ID}"
-        rdb.hset(self.session_key, mapping={
-            "start_time": str(time.time()),
-            "action_count": "0",
-            "selections": "[]",
-            "initial_threshold": "0.75",
-        })
-        rdb.expire(self.session_key, 7200)
-
-    def publish_brain_state(self, brain_state, gaze_x, gaze_y, engagement):
-        if not HAS_REDIS:
-            return
-        try:
-            rdb.xadd(self.stream_key, {
-                "ts": str(int(time.time() * 1000)),
-                "engagement": f"{engagement:.3f}",
-                "focus": f"{brain_state['focus']:.3f}",
-                "theta_beta": f"{brain_state['theta_beta']:.3f}",
-                "alpha": f"{brain_state['alpha']:.3f}",
-                "beta": f"{brain_state['beta']:.3f}",
-                "gaze_x": str(gaze_x),
-                "gaze_y": str(gaze_y),
-            }, maxlen=6000, approximate=True)  # ~5 min at 20Hz
-
-            # Track rolling baseline for drift detection
-            self.baseline_values.append(engagement)
-            now = time.time()
-            if now - self.last_baseline_update > 30:  # every 30s
-                self._update_baseline()
-                self.last_baseline_update = now
-
-        except Exception:
-            pass
-
-    def _update_baseline(self):
-        if not self.baseline_values:
-            return
-        mean = float(np.mean(self.baseline_values[-600:]))  # last 30s worth
-        std = float(np.std(self.baseline_values[-600:]))
-        try:
-            rdb.hset(self.baseline_key, mapping={
-                "mean": f"{mean:.4f}",
-                "std": f"{std:.4f}",
-                "n_samples": str(len(self.baseline_values)),
-                "updated_at": str(time.time()),
-            })
-            rdb.expire(self.baseline_key, 7200)
-        except Exception:
-            pass
-
-    def detect_drift(self, current_engagement):
-        """Check if current engagement has drifted from baseline."""
-        if not HAS_REDIS:
-            return None
-        try:
-            baseline = rdb.hgetall(self.baseline_key)
-            if not baseline or "mean" not in baseline:
-                return None
-            b_mean = float(baseline["mean"])
-            b_std = float(baseline["std"])
-            if b_std < 0.01:
-                return None
-            z_score = (current_engagement - b_mean) / b_std
-            if abs(z_score) > 2.0:
-                return {"drift": True, "z_score": z_score, "baseline_mean": b_mean,
-                        "current": current_engagement, "direction": "up" if z_score > 0 else "down"}
-            return None
-        except Exception:
-            return None
-
-    def record_selection(self, element_id, engagement, brain_persona, reward):
-        if not HAS_REDIS:
-            return
-        try:
-            rdb.hincrby(self.session_key, "action_count", 1)
-            # Append to selection history
-            history = json.loads(rdb.hget(self.session_key, "selections") or "[]")
-            history.append({
-                "element": element_id,
-                "engagement": round(engagement, 3),
-                "persona": brain_persona,
-                "reward": round(reward, 3),
-                "time": time.time(),
-            })
-            # Keep last 100
-            rdb.hset(self.session_key, "selections", json.dumps(history[-100:]))
-        except Exception:
-            pass
-
-    def get_session_summary(self):
-        if not HAS_REDIS:
-            return {}
-        try:
-            data = rdb.hgetall(self.session_key)
-            return data
-        except Exception:
-            return {}
-
-
-brain_bus = RedisBrainBus()
+# ── OpenAI (optional) ──
+try:
+    from openai import OpenAI
+    oai_client = OpenAI()
+except Exception:
+    oai_client = None
 
 
 # ═════════════════════════════════════════════════════════════
@@ -258,164 +106,48 @@ class OneEuroFilter:
 
 
 # ═════════════════════════════════════════════════════════════
-# EEG PROCESSING
+# EEG
 # ═════════════════════════════════════════════════════════════
 
 EEG_SR = 256
 BANDS = [("delta", 1.0, 4.0), ("theta", 4.0, 8.0), ("alpha", 8.0, 13.0),
          ("beta", 13.0, 30.0), ("gamma", 30.0, 50.0)]
 
-def compute_band_powers(data_1ch):
-    if len(data_1ch) < EEG_SR:
-        return {n: 0.0 for n, _, _ in BANDS}
-    out = data_1ch.copy()
-    DataFilter.detrend(out, DetrendOperations.LINEAR.value)
-    DataFilter.perform_bandpass(out, EEG_SR, 1.0, 50.0, 4,
-                                FilterTypes.BUTTERWORTH.value, 0.0)
-    DataFilter.remove_environmental_noise(out, EEG_SR, NoiseTypes.SIXTY.value)
-    nfft = DataFilter.get_nearest_power_of_two(EEG_SR)
-    psd = DataFilter.get_psd_welch(out, nfft, nfft // 2, EEG_SR,
-                                    WindowOperations.HANNING.value)
-    return {n: float(DataFilter.get_band_power(psd, lo, hi)) for n, lo, hi in BANDS}
-
-
-@weave.op
-def compute_brain_state(eeg_window):
-    """Extract engagement, focus, and raw band powers from EEG."""
+def compute_engagement(eeg_window):
     if eeg_window is None or eeg_window.shape[1] < EEG_SR:
-        return {"engagement": 0.5, "focus": 0.5, "theta_beta": 1.0,
-                "alpha": 0.0, "beta": 0.0, "theta": 0.0}
-
-    bp1 = compute_band_powers(eeg_window[1])  # AF7
-    bp2 = compute_band_powers(eeg_window[2])  # AF8
-
+        return None
+    def bp(data):
+        out = data.copy()
+        DataFilter.detrend(out, DetrendOperations.LINEAR.value)
+        DataFilter.perform_bandpass(out, EEG_SR, 1.0, 50.0, 4, FilterTypes.BUTTERWORTH.value, 0.0)
+        DataFilter.remove_environmental_noise(out, EEG_SR, NoiseTypes.SIXTY.value)
+        nfft = DataFilter.get_nearest_power_of_two(EEG_SR)
+        psd = DataFilter.get_psd_welch(out, nfft, nfft // 2, EEG_SR, WindowOperations.HANNING.value)
+        return {n: float(DataFilter.get_band_power(psd, lo, hi)) for n, lo, hi in BANDS}
+    bp1 = bp(eeg_window[1])
+    bp2 = bp(eeg_window[2])
     alpha = (bp1["alpha"] + bp2["alpha"]) / 2
     theta = (bp1["theta"] + bp2["theta"]) / 2
     beta = (bp1["beta"] + bp2["beta"]) / 2
-
-    engagement = beta / (alpha + theta + 0.001)
-    theta_beta = theta / (beta + 0.001)
-
-    return {
-        "engagement": float(engagement),
-        "focus": float(1.0 / (1.0 + theta_beta)),
-        "theta_beta": float(theta_beta),
-        "alpha": float(alpha),
-        "beta": float(beta),
-        "theta": float(theta),
-    }
-
-
-def detect_errp(eeg_window, action_time):
-    """Simple ErrP detection: check for frontal negativity 250-500ms post-action."""
-    if eeg_window is None or eeg_window.shape[1] < EEG_SR:
-        return 0.0
-
-    elapsed = time.time() - action_time
-    if elapsed < 0.2 or elapsed > 0.8:
-        return 0.0
-
-    # Look at frontal channels (AF7=1, AF8=2) in the 250-500ms window
-    start_sample = max(0, eeg_window.shape[1] - int(0.5 * EEG_SR))
-    end_sample = max(0, eeg_window.shape[1] - int(0.2 * EEG_SR))
-    if end_sample <= start_sample:
-        return 0.0
-
-    segment = eeg_window[1:3, start_sample:end_sample]  # AF7, AF8
-    if segment.shape[1] < 10:
-        return 0.0
-
-    # ErrP signature: negative deflection followed by positive
-    avg = segment.mean(axis=0)
-    mid = len(avg) // 2
-    first_half = avg[:mid].mean()
-    second_half = avg[mid:].mean()
-
-    # Negative-then-positive pattern
-    if first_half < -20 and second_half > 10:
-        return 0.8
-    elif first_half < -10:
-        return 0.4
-    return 0.1
+    return float(beta / (alpha + theta + 0.001))
 
 
 # ═════════════════════════════════════════════════════════════
-# LinUCB CONTEXTUAL BANDIT
+# ATTENTION ENGINE — simple, sticky, element-based
 # ═════════════════════════════════════════════════════════════
 
-class LinUCBBandit:
-    """LinUCB contextual bandit with neural reward signal."""
-
-    def __init__(self, n_actions, context_dim=12, alpha=1.5):
-        self.n_actions = n_actions
-        self.d = context_dim
-        self.alpha = alpha
-        # Per-arm parameters
-        self.A = [np.eye(context_dim) for _ in range(n_actions)]
-        self.b = [np.zeros(context_dim) for _ in range(n_actions)]
-        self.total_updates = 0
-        self.reward_history = []
-
-    def select_action(self, context):
-        """Select action using UCB. Returns (action_idx, confidence)."""
-        ctx = np.array(context, dtype=np.float64)[:self.d]
-        if len(ctx) < self.d:
-            ctx = np.concatenate([ctx, np.zeros(self.d - len(ctx))])
-
-        scores = np.zeros(self.n_actions)
-        for a in range(self.n_actions):
-            A_inv = np.linalg.inv(self.A[a])
-            theta = A_inv @ self.b[a]
-            pred = ctx @ theta
-            ucb = self.alpha * np.sqrt(ctx @ A_inv @ ctx)
-            scores[a] = pred + ucb
-
-        best = int(np.argmax(scores))
-        # Confidence via softmax
-        exp_scores = np.exp(scores - scores.max())
-        probs = exp_scores / exp_scores.sum()
-        return best, float(probs[best])
-
-    def update(self, context, action, reward):
-        """Update arm with observed reward."""
-        ctx = np.array(context, dtype=np.float64)[:self.d]
-        if len(ctx) < self.d:
-            ctx = np.concatenate([ctx, np.zeros(self.d - len(ctx))])
-
-        self.A[action] += np.outer(ctx, ctx)
-        self.b[action] += reward * ctx
-        self.total_updates += 1
-        self.reward_history.append(reward)
-
-    @property
-    def avg_reward(self):
-        if not self.reward_history:
-            return 0.0
-        return np.mean(self.reward_history[-50:])
-
-
-# ═════════════════════════════════════════════════════════════
-# ATTENTION ENGINE (proven from gaze-select)
-# ═════════════════════════════════════════════════════════════
-
-MOTOR_PAD = 50   # reduced — was causing overlapping hit zones with 20px gaps
-EXIT_DELAY = 0.4  # sticky — don't unhighlight for 400ms
-SWITCH_MIN_DIST = 60  # minimum distance from current pin before switching to new element
+MOTOR_PAD = 50
+EXIT_DELAY = 0.4
+SWITCH_DIST = 60
 
 class ElementState:
     def __init__(self, id, x, y, w, h):
         self.id = id
-        self.x = x
-        self.y = y
-        self.w = w
-        self.h = h
+        self.x = x; self.y = y; self.w = w; self.h = h
         self.confidence = 0.0
         self.dwell_time = 0.0
-        self.gaze_in = False
-        self.highlighted = False
+        self.pinned = False
         self.last_enter = 0.0
-        self.last_exit = 0.0
-        self.stability = 0.0
 
     @property
     def cx(self): return self.x + self.w // 2
@@ -424,131 +156,78 @@ class ElementState:
 
 
 class AttentionEngine:
-    """Sticky, element-based attention. No cursor — just highlights.
-
-    Philosophy: the user is GUIDING us, not hiding. If gaze is near
-    an element, commit to highlighting it. Only switch when gaze is
-    clearly on a DIFFERENT element. Looking away = rejection signal.
-    """
-
-    def __init__(self, n_elements):
-        has_eeg = USE_EEG and is_bridge_running() if USE_EEG else False
-        if has_eeg:
-            self.dwell_weight = 0.30
-            self.stability_weight = 0.20
-            self.proximity_weight = 0.15
-            self.eeg_weight = 0.35
-        else:
-            # No EEG — redistribute weight to gaze signals
-            self.dwell_weight = 0.45
-            self.stability_weight = 0.30
-            self.proximity_weight = 0.25
-            self.eeg_weight = 0.0
-        self.dwell_saturate = 1.8 * (1 + max(0, math.log2(max(1, n_elements) / 4)))
+    def __init__(self, has_eeg=False):
         self.select_threshold = 0.75
-        self.decay_rate = 0.94  # slower decay — stickier
-        self.gaze_history = deque(maxlen=20)
-        self.pinned_id = None  # currently highlighted element
-        self.pinned_since = 0.0
-        self.empty_gaze_since = 0.0  # when gaze last left all elements
-
-    def _find_nearest(self, elements, gaze_x, gaze_y):
-        """Find the element closest to gaze, within motor range."""
-        best_id = None
-        best_dist = float('inf')
-        for el in elements.values():
-            if (el.x - MOTOR_PAD <= gaze_x <= el.x + el.w + MOTOR_PAD and
-                    el.y - MOTOR_PAD <= gaze_y <= el.y + el.h + MOTOR_PAD):
-                dist = math.hypot(gaze_x - el.cx, gaze_y - el.cy)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_id = el.id
-        return best_id
+        self.dwell_saturate = 2.0
+        self.decay_rate = 0.94
+        self.pinned_id = None
+        self.empty_since = 0.0
+        self.has_eeg = has_eeg
 
     def update(self, elements, gaze_x, gaze_y, engagement):
         now = time.time()
-        self.gaze_history.append((gaze_x, gaze_y, now))
 
-        # Gaze velocity → stability
-        gaze_speed = 0.0
-        if len(self.gaze_history) >= 3:
-            pts = list(self.gaze_history)
-            dists = [math.hypot(pts[k][0] - pts[k-1][0], pts[k][1] - pts[k-1][1])
-                     for k in range(1, len(pts))]
-            span = pts[-1][2] - pts[0][2]
-            if span > 0:
-                gaze_speed = sum(dists) / span
-        stability = max(0, min(1, 1.0 - (gaze_speed - 40) / 400))
+        # Find nearest element within range
+        nearest_id = None
+        nearest_dist = float('inf')
+        for el in elements.values():
+            if (el.x - MOTOR_PAD <= gaze_x <= el.x + el.w + MOTOR_PAD and
+                    el.y - MOTOR_PAD <= gaze_y <= el.y + el.h + MOTOR_PAD):
+                d = math.hypot(gaze_x - el.cx, gaze_y - el.cy)
+                if d < nearest_dist:
+                    nearest_dist = d
+                    nearest_id = el.id
 
-        # Find which element gaze is nearest to
-        nearest_id = self._find_nearest(elements, gaze_x, gaze_y)
-
-        # Sticky pin logic:
-        # - If gaze is on a NEW element, switch pin immediately (user is guiding)
-        # - If gaze is on the SAME element, keep building confidence
-        # - If gaze is on NO element, keep current pin for EXIT_DELAY, then unpin
+        # Sticky pin logic
         if nearest_id is not None:
-            self.empty_gaze_since = 0
+            self.empty_since = 0
             if nearest_id != self.pinned_id:
-                # Only switch if gaze has moved meaningfully away from current pin
+                # Check if gaze moved far enough from current pin
                 should_switch = True
                 if self.pinned_id and self.pinned_id in elements:
-                    pinned_el = elements[self.pinned_id]
-                    dist_from_pinned = math.hypot(gaze_x - pinned_el.cx, gaze_y - pinned_el.cy)
-                    # Stay on current pin if gaze hasn't moved far enough
-                    if dist_from_pinned < SWITCH_MIN_DIST:
+                    p = elements[self.pinned_id]
+                    if math.hypot(gaze_x - p.cx, gaze_y - p.cy) < SWITCH_DIST:
                         should_switch = False
 
                 if should_switch:
+                    # Unpin old
                     if self.pinned_id and self.pinned_id in elements:
-                        elements[self.pinned_id].gaze_in = False
-                        elements[self.pinned_id].dwell_time = 0
+                        old = elements[self.pinned_id]
+                        old.pinned = False
+                        old.dwell_time = 0
+                        old.confidence *= 0.3
+                    # Pin new
                     self.pinned_id = nearest_id
-                    self.pinned_since = now
                     el = elements[nearest_id]
-                    el.gaze_in = True
+                    el.pinned = True
                     el.last_enter = now
                     el.dwell_time = 0
-                    el.highlighted = True
         else:
-            # Gaze is in empty space
-            if self.empty_gaze_since == 0:
-                self.empty_gaze_since = now
-            elif now - self.empty_gaze_since > EXIT_DELAY:
-                # Gaze has been away long enough — unpin
+            if self.empty_since == 0:
+                self.empty_since = now
+            elif now - self.empty_since > EXIT_DELAY:
                 if self.pinned_id and self.pinned_id in elements:
-                    elements[self.pinned_id].gaze_in = False
+                    elements[self.pinned_id].pinned = False
                     elements[self.pinned_id].dwell_time = 0
-                    elements[self.pinned_id].highlighted = False
                 self.pinned_id = None
 
-        # Update all elements
+        # Update confidence
         selected_id = None
         for el in elements.values():
-            is_pinned = (el.id == self.pinned_id)
-
-            if is_pinned:
-                el.gaze_in = True
+            if el.id == self.pinned_id:
+                el.pinned = True
                 el.dwell_time = now - el.last_enter
-                el.stability = stability
-                el.highlighted = True
-
-                # Compute confidence
-                dist = math.hypot(gaze_x - el.cx, gaze_y - el.cy)
-                max_dist = math.hypot(el.w, el.h) / 2 + MOTOR_PAD
-                proximity = max(0, 1.0 - dist / max_dist) if max_dist > 0 else 0
-
                 dwell_score = min(1.0, el.dwell_time / self.dwell_saturate)
-                eeg_score = max(0, min(1, engagement))
 
-                raw = (self.dwell_weight * dwell_score +
-                       self.stability_weight * stability +
-                       self.proximity_weight * proximity +
-                       self.eeg_weight * eeg_score)
-                el.confidence = el.confidence * 0.65 + raw * 0.35
+                if self.has_eeg and engagement is not None:
+                    eeg_score = max(0, min(1, engagement))
+                    raw = 0.55 * dwell_score + 0.45 * eeg_score
+                else:
+                    raw = dwell_score
+
+                el.confidence = el.confidence * 0.6 + raw * 0.4
             else:
-                el.gaze_in = False
-                el.highlighted = False
+                el.pinned = False
                 el.confidence *= self.decay_rate
 
             el.confidence = max(0, min(1, el.confidence))
@@ -560,342 +239,163 @@ class AttentionEngine:
     def reset_all(self, elements):
         for el in elements.values():
             el.confidence = 0
-            el.gaze_in = False
+            el.pinned = False
             el.dwell_time = 0
-            el.highlighted = False
         self.pinned_id = None
-        self.empty_gaze_since = 0
-
-
-# ═════════════════════════════════════════════════════════════
-# NEUROLLM — Brain-state-conditioned LLM
-# ═════════════════════════════════════════════════════════════
-
-BRAIN_PERSONAS = {
-    "focused": "The user is highly focused and engaged. They know what they want. "
-               "Be precise and direct. Confirm their current trajectory.",
-    "browsing": "The user is casually browsing. They're exploring, not deciding. "
-                "Present options broadly. Don't rush them toward action.",
-    "deciding": "The user is actively evaluating options. They're comparing and deliberating. "
-                "Highlight key differences. Present clear comparisons.",
-    "confused": "The user seems uncertain or overwhelmed. Their cognitive load is high. "
-                "Simplify choices. Reduce visual clutter. Explain clearly.",
-}
-
-def get_brain_persona(brain_state):
-    """Map brain metrics to a persona for LLM prompt injection."""
-    eng = brain_state["engagement"]
-    tb = brain_state["theta_beta"]
-    focus = brain_state["focus"]
-
-    if eng > 0.7 and focus > 0.6:
-        return "focused", BRAIN_PERSONAS["focused"]
-    elif tb > 2.0:
-        return "confused", BRAIN_PERSONAS["confused"]
-    elif eng > 0.4 and eng < 0.7:
-        return "deciding", BRAIN_PERSONAS["deciding"]
-    else:
-        return "browsing", BRAIN_PERSONAS["browsing"]
-
-
-def neural_temperature(engagement):
-    """Map engagement to LLM temperature. High focus → low temp → precise."""
-    return max(0.1, min(1.0, 1.0 - engagement * 0.8))
-
-
-@weave.op
-def page_classify(page_title, element_labels):
-    """Use OpenAI to classify page elements into semantic zones."""
-    persona_name, persona = get_brain_persona(shared_state["brain_state"])
-    temp = neural_temperature(shared_state["brain_state"]["engagement"])
-
-    try:
-        response = oai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=temp,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": f"""You classify web UI elements for a brain-computer interface.
-{persona}
-Classify each element as: NAV, ACTION, CONTENT, LINK, or PASSIVE.
-Predict the top 3 likely-next-click elements.
-Return JSON: {{"elements": [{{"id": "...", "type": "...", "priority": 0.0-1.0}}], "likely_next": ["id1","id2","id3"]}}"""},
-                {"role": "user", "content": f"Page: {page_title}\nElements: {json.dumps(element_labels)}"}
-            ],
-        )
-        return json.loads(response.choices[0].message.content)
-    except Exception as e:
-        print(f"[PAGE] Classification error: {e}", flush=True)
-        return {"elements": [], "likely_next": []}
-
-
-# ═════════════════════════════════════════════════════════════
-# SELF-IMPROVEMENT AGENT
-# ═════════════════════════════════════════════════════════════
-
-class SelfImprovementAgent:
-    """Adjusts thresholds and bandit parameters based on accumulated feedback."""
-
-    def __init__(self):
-        self.action_log = []  # (time, element_id, engagement, reward)
-        self.last_improvement = time.time()
-        self.improvement_interval = 30.0  # seconds
-        self.threshold_history = []
-
-    @weave.op
-    def record_action(self, element_id, engagement, brain_state, reward):
-        self.action_log.append({
-            "time": time.time(),
-            "element_id": element_id,
-            "engagement": engagement,
-            "focus": brain_state["focus"],
-            "theta_beta": brain_state["theta_beta"],
-            "reward": reward,
-        })
-        return {"logged": True, "total_actions": len(self.action_log)}
-
-    @weave.op
-    def maybe_improve(self, engine, bandit):
-        """Check if it's time to adjust thresholds."""
-        now = time.time()
-        if now - self.last_improvement < self.improvement_interval:
-            return None
-        if len(self.action_log) < 5:
-            return None
-
-        self.last_improvement = now
-        recent = self.action_log[-20:]
-
-        # Compute metrics
-        avg_reward = np.mean([a["reward"] for a in recent])
-        pos_rate = np.mean([1 if a["reward"] > 0 else 0 for a in recent])
-        avg_engagement = np.mean([a["engagement"] for a in recent])
-
-        adjustments = {}
-
-        # If too many false positives (low reward), raise threshold
-        if avg_reward < 0.3 and pos_rate < 0.6:
-            engine.select_threshold = min(0.90, engine.select_threshold + 0.03)
-            adjustments["select_threshold"] = engine.select_threshold
-            adjustments["reason"] = "too many false positives"
-
-        # If accuracy is good but slow, lower threshold slightly
-        elif pos_rate > 0.8 and avg_reward > 0.5:
-            engine.select_threshold = max(0.55, engine.select_threshold - 0.02)
-            adjustments["select_threshold"] = engine.select_threshold
-            adjustments["reason"] = "accuracy good, can be faster"
-
-        # Adjust EEG weight based on how predictive engagement is
-        high_eng_actions = [a for a in recent if a["engagement"] > 0.6]
-        low_eng_actions = [a for a in recent if a["engagement"] <= 0.6]
-        if high_eng_actions and low_eng_actions:
-            high_reward = np.mean([a["reward"] for a in high_eng_actions])
-            low_reward = np.mean([a["reward"] for a in low_eng_actions])
-            if high_reward > low_reward + 0.2:
-                engine.eeg_weight = min(0.45, engine.eeg_weight + 0.02)
-                adjustments["eeg_weight"] = engine.eeg_weight
-                adjustments["eeg_reason"] = "engagement is predictive, increasing weight"
-
-        if adjustments:
-            self.threshold_history.append((now, adjustments))
-            print(f"[IMPROVE] {adjustments}", flush=True)
-
-        return adjustments if adjustments else None
 
 
 # ═════════════════════════════════════════════════════════════
 # SHARED STATE
 # ═════════════════════════════════════════════════════════════
 
-shared_state = {
+state = {
     "gaze_x": 0, "gaze_y": 0,
-    "engagement": 0.5,
-    "brain_state": {"engagement": 0.5, "focus": 0.5, "theta_beta": 1.0,
-                    "alpha": 0.0, "beta": 0.0, "theta": 0.0},
-    "brain_persona": "browsing",
+    "engagement": None,
     "elements": {},
     "engine": None,
-    "bandit": None,
-    "improver": SelfImprovementAgent(),
     "selected": None,
     "cooldown_until": 0,
-    "last_action_time": 0,
-    "prev_engagement": 0.5,
     "action_count": 0,
-    "bandit_avg_reward": 0.0,
+    "calibrated": False,
+    "cal_features": [],  # collected during browser calibration
+    "cal_targets": [],
     "ready": False,
 }
 ws_clients = set()
 
 
 # ═════════════════════════════════════════════════════════════
-# PERCEPTION + INTENT LOOP (Tier 1, 30Hz, no LLM)
+# PERCEPTION LOOP — webcam + EEG, no UI
 # ═════════════════════════════════════════════════════════════
 
 def perception_loop(cam_idx, gaze_estimator, eeg):
     filter_x = OneEuroFilter(min_cutoff=0.8, beta=0.008)
     filter_y = OneEuroFilter(min_cutoff=0.8, beta=0.008)
     eng_history = deque(maxlen=15)
-    eeg_tick = 0  # process EEG every 3rd frame to not block gaze
+    tick = 0
 
     cap = cv2.VideoCapture(cam_idx)
     print("[PERCEPTION] Started", flush=True)
 
-    while shared_state["ready"]:
-        # EEG — process every 3rd frame (~10Hz) to not block gaze (~30Hz)
-        eeg_tick += 1
-        if eeg and eeg_tick % 3 == 0:
-            eeg.pull()
-            w = eeg.get_window(2.0)
-            brain = compute_brain_state(w)
-            shared_state["brain_state"] = brain
-            eng_history.append(brain["engagement"])
-            shared_state["engagement"] = float(np.mean(eng_history))
+    while state["ready"]:
+        tick += 1
 
-            persona_name, _ = get_brain_persona(brain)
-            shared_state["brain_persona"] = persona_name
-
-            # Publish to Redis (non-blocking)
-            brain_bus.publish_brain_state(brain, shared_state["gaze_x"],
-                                          shared_state["gaze_y"],
-                                          shared_state["engagement"])
-
-            # Check for calibration drift
-            drift = brain_bus.detect_drift(shared_state["engagement"])
-            if drift:
-                print(f"[DRIFT] Engagement drifted {drift['direction']} "
-                      f"(z={drift['z_score']:.1f}, baseline={drift['baseline_mean']:.3f}, "
-                      f"current={drift['current']:.3f})", flush=True)
-        elif eeg and eeg_tick % 3 == 1:
-            eeg.pull()  # still pull samples to keep buffer fresh
-
-            # ErrP check after actions (runs on non-EEG frames for speed)
-            if shared_state["last_action_time"] > 0:
-                errp = detect_errp(w, shared_state["last_action_time"])
-                elapsed = time.time() - shared_state["last_action_time"]
-                if elapsed > 0.8:
-                    # Window expired — compute final reward
-                    eng_delta = shared_state["engagement"] - shared_state["prev_engagement"]
-                    reward = 0.7 * (1.0 - errp) + 0.3 * np.clip(eng_delta * 5, -1, 1)
-
-                    bandit = shared_state["bandit"]
-                    if bandit and hasattr(shared_state, "_last_context"):
-                        bandit.update(shared_state["_last_context"],
-                                      shared_state["_last_action"], reward)
-                        shared_state["bandit_avg_reward"] = bandit.avg_reward
-
-                    # Log to self-improvement agent
-                    shared_state["improver"].record_action(
-                        shared_state.get("_last_element_id", ""),
-                        shared_state["engagement"],
-                        brain, reward
-                    )
-
-                    # Record in Redis session memory
-                    brain_bus.record_selection(
-                        shared_state.get("_last_element_id", ""),
-                        shared_state["engagement"],
-                        shared_state["brain_persona"],
-                        float(reward),
-                    )
-
-                    shared_state["last_action_time"] = 0
-
-        # Gaze
+        # Gaze — every frame
         ret, frame = cap.read()
         if ret:
             features, blink = gaze_estimator.extract_features(frame)
             if features is not None and not blink:
-                raw = gaze_estimator.predict(np.array([features]))[0]
-                t = time.time()
-                shared_state["gaze_x"] = int(filter_x(raw[0], t))
-                shared_state["gaze_y"] = int(filter_y(raw[1], t))
+                # Store latest features for calibration
+                state["_latest_features"] = features
 
-        # Intent (attention engine)
-        now = time.time()
-        engine = shared_state["engine"]
-        elements = shared_state["elements"]
+                if state["calibrated"]:
+                    raw = gaze_estimator.predict(np.array([features]))[0]
+                    t = time.time()
+                    state["gaze_x"] = int(filter_x(raw[0], t))
+                    state["gaze_y"] = int(filter_y(raw[1], t))
 
-        if engine and elements and now > shared_state["cooldown_until"]:
-            sel = engine.update(elements, shared_state["gaze_x"],
-                                shared_state["gaze_y"], shared_state["engagement"])
-            if sel is not None:
-                shared_state["selected"] = sel
-                shared_state["prev_engagement"] = shared_state["engagement"]
-                shared_state["last_action_time"] = now
-                shared_state["action_count"] += 1
+        # EEG — every 3rd frame
+        if eeg and tick % 3 == 0:
+            eeg.pull()
+            w = eeg.get_window(2.0)
+            eng = compute_engagement(w)
+            if eng is not None:
+                eng_history.append(eng)
+                state["engagement"] = float(np.mean(eng_history))
 
-                # Build context for bandit
-                el = elements[sel]
-                context = [
-                    shared_state["gaze_x"] / 1470.0,
-                    shared_state["gaze_y"] / 956.0,
-                    el.dwell_time,
-                    shared_state["brain_state"]["alpha"],
-                    shared_state["brain_state"]["beta"],
-                    shared_state["brain_state"]["theta"],
-                    shared_state["engagement"],
-                    shared_state["brain_state"]["focus"],
-                    shared_state["brain_state"]["theta_beta"],
-                    el.confidence,
-                    el.stability,
-                    shared_state["action_count"] / 100.0,
-                ]
-                shared_state["_last_context"] = context
-                shared_state["_last_action"] = list(elements.keys()).index(sel)
-                shared_state["_last_element_id"] = sel
+        # Attention engine — every frame when calibrated
+        if state["calibrated"]:
+            now = time.time()
+            engine = state["engine"]
+            elements = state["elements"]
 
-                engine.reset_all(elements)
-                shared_state["cooldown_until"] = now + 2.0
+            if engine and elements and now > state["cooldown_until"]:
+                sel = engine.update(elements, state["gaze_x"], state["gaze_y"],
+                                    state["engagement"])
+                if sel is not None:
+                    state["selected"] = sel
+                    state["action_count"] += 1
+                    engine.reset_all(elements)
+                    state["cooldown_until"] = now + 2.0
+                    print(f"[SELECT] {sel} (eng={state['engagement']}, "
+                          f"actions={state['action_count']})", flush=True)
 
-                print(f"[INTENT] Selected {sel} (engagement={shared_state['engagement']:.2f}, "
-                      f"persona={shared_state['brain_persona']})", flush=True)
-
-        # Self-improvement check
-        if engine:
-            shared_state["improver"].maybe_improve(engine, shared_state.get("bandit"))
-
-        time.sleep(0.030)
+        time.sleep(0.025)  # ~40Hz
 
     cap.release()
-    print("[PERCEPTION] Stopped", flush=True)
 
 
 # ═════════════════════════════════════════════════════════════
-# WEBSOCKET SERVER
+# WEBSOCKET — calibration + state broadcast
 # ═════════════════════════════════════════════════════════════
 
 async def ws_handler(websocket):
     ws_clients.add(websocket)
-    print(f"[WS] Client connected ({len(ws_clients)})", flush=True)
+    print(f"[WS] Client connected", flush=True)
+
+    # Tell browser current calibration state
+    await websocket.send(json.dumps({
+        "type": "init",
+        "calibrated": state["calibrated"],
+        "has_eeg": state["engagement"] is not None,
+    }))
+
     try:
         async for msg in websocket:
             data = json.loads(msg)
-            if data.get("type") == "register_elements":
-                # Browser sends viewport-relative coords. We need screen-absolute.
-                # The browser also sends its window position via screenX/screenY.
+
+            if data["type"] == "cal_point":
+                # Browser user clicked a calibration dot at these SCREEN coordinates
+                screen_x = data["screen_x"]
+                screen_y = data["screen_y"]
+                features = state.get("_latest_features")
+
+                if features is not None:
+                    # Collect multiple frames for this point
+                    state["cal_features"].append(features.copy())
+                    state["cal_targets"].append([screen_x, screen_y])
+                    n = len(state["cal_features"])
+                    print(f"[CAL] Point {n}: ({screen_x}, {screen_y})", flush=True)
+
+                    await websocket.send(json.dumps({
+                        "type": "cal_ack", "count": n,
+                    }))
+
+            elif data["type"] == "cal_done":
+                # Train the gaze model
+                n = len(state["cal_features"])
+                if n >= 5:
+                    X = np.array(state["cal_features"])
+                    y = np.array(state["cal_targets"])
+                    state["_gaze_estimator"].train(X, y)
+                    state["calibrated"] = True
+                    print(f"[CAL] Trained on {n} points. Gaze active!", flush=True)
+
+                    await websocket.send(json.dumps({
+                        "type": "cal_complete", "n_points": n,
+                    }))
+                else:
+                    await websocket.send(json.dumps({
+                        "type": "cal_error", "msg": f"Need at least 5 points, got {n}",
+                    }))
+
+            elif data["type"] == "register_elements":
                 win_x = data.get("window_x", 0)
                 win_y = data.get("window_y", 0)
-                chrome_h = data.get("chrome_height", 0)  # browser toolbar height
+                chrome_h = data.get("chrome_height", 0)
+
                 elements = {}
                 for el in data["elements"]:
-                    # Convert viewport coords to screen coords
                     elements[el["id"]] = ElementState(
                         el["id"],
                         el["x"] + win_x,
                         el["y"] + win_y + chrome_h,
                         el["w"], el["h"])
-                shared_state["elements"] = elements
-                shared_state["engine"] = AttentionEngine(n_elements=len(elements))
-                shared_state["bandit"] = LinUCBBandit(n_actions=len(elements))
-                print(f"[WS] Registered {len(elements)} elements, bandit initialized", flush=True)
 
-                # Async page classification
-                labels = [{"id": el["id"], "label": el.get("label", el["id"])}
-                          for el in data["elements"]]
-                title = data.get("page_title", "Unknown Page")
-                threading.Thread(target=lambda: page_classify(title, labels),
-                                 daemon=True).start()
+                state["elements"] = elements
+                has_eeg = state["engagement"] is not None
+                state["engine"] = AttentionEngine(has_eeg=has_eeg)
+                print(f"[WS] {len(elements)} elements registered", flush=True)
 
     except websockets.exceptions.ConnectionClosed:
         pass
@@ -904,40 +404,29 @@ async def ws_handler(websocket):
 
 
 async def broadcast_loop():
-    while shared_state["ready"]:
-        if ws_clients:
+    while state["ready"]:
+        if ws_clients and state["calibrated"]:
             elements_data = {}
-            engine = shared_state["engine"]
-            pinned = engine.pinned_id if engine else None
-            for eid, el in shared_state["elements"].items():
+            for eid, el in state["elements"].items():
                 elements_data[eid] = {
                     "confidence": round(el.confidence, 3),
-                    "gaze_in": el.gaze_in,
-                    "highlighted": el.highlighted,
-                    "pinned": eid == pinned,
+                    "pinned": el.pinned,
                     "dwell_time": round(el.dwell_time, 2),
                 }
 
             msg = json.dumps({
                 "type": "state",
-                "gaze_x": shared_state["gaze_x"],
-                "gaze_y": shared_state["gaze_y"],
-                "engagement": round(shared_state["engagement"], 3),
-                "brain_persona": shared_state["brain_persona"],
-                "brain_state": {k: round(v, 3) if isinstance(v, float) else v
-                                for k, v in shared_state["brain_state"].items()},
+                "gaze_x": state["gaze_x"],
+                "gaze_y": state["gaze_y"],
+                "engagement": round(state["engagement"], 3) if state["engagement"] else None,
                 "elements": elements_data,
-                "selected": shared_state["selected"],
-                "action_count": shared_state["action_count"],
-                "bandit_avg_reward": round(shared_state["bandit_avg_reward"], 3),
-                "threshold": round(shared_state["engine"].select_threshold, 3)
-                             if shared_state["engine"] else 0.75,
-                "session_id": SESSION_ID,
-                "has_redis": HAS_REDIS,
+                "selected": state["selected"],
+                "action_count": state["action_count"],
+                "threshold": round(state["engine"].select_threshold, 3) if state["engine"] else 0.75,
             })
 
-            if shared_state["selected"]:
-                shared_state["selected"] = None
+            if state["selected"]:
+                state["selected"] = None
 
             dead = set()
             for ws in list(ws_clients):
@@ -950,91 +439,11 @@ async def broadcast_loop():
         await asyncio.sleep(0.05)
 
 
-def start_http_server():
+def start_http():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    handler = SimpleHTTPRequestHandler
-    httpd = HTTPServer(("127.0.0.1", 8090), handler)
+    httpd = HTTPServer(("127.0.0.1", 8090), SimpleHTTPRequestHandler)
     print("[HTTP] http://localhost:8090", flush=True)
     httpd.serve_forever()
-
-
-# ═════════════════════════════════════════════════════════════
-# NETFLIX-MAPPED CALIBRATION
-# ═════════════════════════════════════════════════════════════
-
-def run_netflix_calibration(gaze_estimator, camera_index, sw, sh):
-    """Two-phase calibration mapped to Netflix UI layout.
-
-    Phase 1: 4 corners + center for general coverage (5 points)
-    Phase 2: 8 points at exact card centers + 2 at control button positions
-             + 4 between cards for interpolation (14 points)
-
-    Total: 19 points, all in regions that actually matter.
-    """
-    from eyetrax.calibration.common import wait_for_face_and_countdown, _pulse_and_capture
-
-    cap = cv2.VideoCapture(camera_index)
-
-    # Wait for face
-    if not wait_for_face_and_countdown(cap, gaze_estimator, sw, sh, 2):
-        cap.release()
-        cv2.destroyAllWindows()
-        return
-
-    margin = 0.08
-    # Phase 1: corners + center (general spatial coverage)
-    phase1_pts = [
-        (int(sw * 0.5), int(sh * 0.5)),      # center
-        (int(sw * margin), int(sh * margin)),  # top-left
-        (int(sw * (1 - margin)), int(sh * margin)),  # top-right
-        (int(sw * margin), int(sh * (1 - margin))),  # bottom-left
-        (int(sw * (1 - margin)), int(sh * (1 - margin))),  # bottom-right
-    ]
-
-    # Phase 2: Netflix card grid positions (4 cols × 2 rows)
-    # Cards start at ~y=120, with padding=40px on each side, gap=20px
-    # This matches the CSS grid in index.html
-    grid_left = 40
-    grid_gap = 20
-    card_w = (sw - 2 * grid_left - 3 * grid_gap) // 4
-    card_h = int(card_w * 10 / 16)  # aspect ratio 16:10
-
-    row1_y = 120 + card_h // 2   # center of top row cards
-    row2_y = 120 + card_h + grid_gap + card_h // 2  # center of bottom row cards
-
-    phase2_pts = []
-    for col in range(4):
-        cx = grid_left + col * (card_w + grid_gap) + card_w // 2
-        phase2_pts.append((cx, row1_y))  # top row card center
-        phase2_pts.append((cx, row2_y))  # bottom row card center
-
-    # Between-card interpolation points (between col 1-2 and col 2-3)
-    for col in [1, 2]:
-        cx = grid_left + col * (card_w + grid_gap) - grid_gap // 2
-        phase2_pts.append((cx, row1_y))
-        phase2_pts.append((cx, row2_y))
-
-    # Player control positions (bottom of screen)
-    phase2_pts.append((int(sw * 0.15), int(sh * 0.88)))  # Play button area
-    phase2_pts.append((int(sw * 0.40), int(sh * 0.88)))  # Back button area
-
-    all_pts = phase1_pts + phase2_pts
-
-    print(f"  Phase 1: {len(phase1_pts)} coverage points")
-    print(f"  Phase 2: {len(phase2_pts)} Netflix-mapped points")
-    print(f"  Total: {len(all_pts)} calibration points")
-
-    result = _pulse_and_capture(gaze_estimator, cap, all_pts, sw, sh,
-                                 pulse_d=0.8, cd_d=1.0)
-    cap.release()
-    cv2.destroyAllWindows()
-
-    if result is None:
-        return
-    feats, targs = result
-    if feats:
-        gaze_estimator.train(np.array(feats), np.array(targs))
-        print(f"  Trained on {len(feats)} samples across {len(all_pts)} points")
 
 
 # ═════════════════════════════════════════════════════════════
@@ -1042,28 +451,9 @@ def run_netflix_calibration(gaze_estimator, camera_index, sw, sh):
 # ═════════════════════════════════════════════════════════════
 
 async def main():
-    try:
-        m = get_monitors()[0]
-        sw, sh = m.width, m.height
-    except Exception:
-        sw, sh = 1470, 956
-    print(f"Screen: {sw}x{sh}")
+    print("AXIOM — Brain-Controlled Streaming")
 
-    # EEG
-    eeg = None
-    if USE_EEG:
-        sys_path = os.path.join(os.path.dirname(__file__), "..", "backend")
-        if is_bridge_running():
-            eeg = EEGBridgeClient()
-            eeg.start()
-            for _ in range(40):
-                eeg.pull()
-                time.sleep(0.05)
-            print("EEG connected", flush=True)
-        else:
-            print("WARNING: No Muse bridge, running without EEG", flush=True)
-
-    # Gaze calibration
+    # Camera
     cam_idx = 1
     for idx in [1, 0]:
         cap = cv2.VideoCapture(idx)
@@ -1072,41 +462,43 @@ async def main():
         if ret:
             cam_idx = idx
             break
+    print(f"Camera: {cam_idx}")
 
+    # Gaze estimator (NO calibration here — browser does it)
     gaze = GazeEstimator(model_name="tiny_mlp")
-    print("\n=== GAZE CALIBRATION ===")
-    print("  Keep the calibration window focused. Move head slightly between dots.")
-    print("  IMPORTANT: After calibration, position your browser at the TOP-LEFT of the screen.")
-    # Use standard dense grid — it gives the best general coverage.
-    # The Netflix-specific calibration assumed the browser was fullscreen
-    # at (0,0) which is often wrong. The coordinate transform in the
-    # WebSocket handler now accounts for browser position.
-    run_dense_grid_calibration(gaze, rows=5, cols=5, order="serpentine",
-                                pulse_d=0.9, cd_d=1.0, camera_index=cam_idx)
-    print("  Done.\n")
+    state["_gaze_estimator"] = gaze
 
-    # Start HTTP server
-    threading.Thread(target=start_http_server, daemon=True).start()
+    # EEG
+    eeg = None
+    if USE_EEG:
+        if is_bridge_running():
+            eeg = EEGBridgeClient()
+            eeg.start()
+            for _ in range(40):
+                eeg.pull()
+                time.sleep(0.05)
+            print("EEG: connected", flush=True)
+        else:
+            print("EEG: no bridge, running without", flush=True)
 
-    # Start perception loop
-    shared_state["ready"] = True
+    # Start servers
+    threading.Thread(target=start_http, daemon=True).start()
+
+    state["ready"] = True
     threading.Thread(target=perception_loop, args=(cam_idx, gaze, eeg), daemon=True).start()
 
-    # Start WebSocket server
     ws_server = await websockets.serve(ws_handler, "127.0.0.1", 8091)
-    print("[WS] ws://127.0.0.1:8091", flush=True)
-    print("\n  Open http://localhost:8090 in your browser\n", flush=True)
+    print(f"\n  Open http://localhost:8090\n  Calibrate by clicking the dots.\n", flush=True)
 
     try:
         await broadcast_loop()
     except KeyboardInterrupt:
         pass
 
-    shared_state["ready"] = False
+    state["ready"] = False
     ws_server.close()
     if eeg:
         eeg.stop()
-    print("Done.")
 
 
 if __name__ == "__main__":

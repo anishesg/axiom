@@ -5,546 +5,424 @@
 <title>AXIOM · Mind-Controlled Streaming</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root { --bg:#0a0a0f; --surface:#141420; --card:#1a1a2e; --border:#2a2a40;
+          --text:#e0e0f0; --dim:#6a6a8a; --accent:#e50914; }
+  body { background:var(--bg); color:var(--text); font-family:'Inter',sans-serif;
+         height:100vh; overflow:hidden; cursor:none; }
 
-  :root {
-    --bg: #0a0a0f;
-    --surface: #141420;
-    --card: #1a1a2e;
-    --border: #2a2a40;
-    --text: #e0e0f0;
-    --dim: #6a6a8a;
-    --accent: #e50914;
-    --glow: rgba(229, 9, 20, 0.4);
-  }
+  .header { display:flex; align-items:center; justify-content:space-between;
+            padding:14px 40px; background:linear-gradient(180deg,rgba(0,0,0,0.8),transparent);
+            position:relative; z-index:20; }
+  .logo { font-size:26px; font-weight:800; color:var(--accent); letter-spacing:2px; }
+  .logo span { color:var(--text); font-weight:400; font-size:14px; margin-left:12px; }
+  .header-right { display:flex; align-items:center; gap:14px; font-size:11px; color:var(--dim); }
+  .eeg-bar { width:80px; height:4px; background:var(--border); border-radius:2px; overflow:hidden; }
+  .eeg-fill { height:100%; background:#00ff88; border-radius:2px; transition:width 0.2s; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#ff4444; }
+  .dot.on { background:#00ff88; box-shadow:0 0 6px #00ff8880; }
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', -apple-system, sans-serif;
-    height: 100vh;
-    overflow: hidden;
-    cursor: none;
+  /* ── Calibration ── */
+  #calScreen { position:fixed; inset:0; z-index:100; background:var(--bg);
+               display:flex; flex-direction:column; }
+  #calScreen.done { display:none; }
+  .cal-header { padding:20px 40px; text-align:center; }
+  .cal-header h2 { font-size:18px; letter-spacing:2px; color:var(--accent); }
+  .cal-header p { font-size:13px; color:var(--dim); margin-top:6px; }
+  .cal-area { flex:1; position:relative; }
+  .cal-dot {
+    position:absolute; width:28px; height:28px; border-radius:50%;
+    background:#1a1a2e; border:2px solid #5a6894;
+    transform:translate(-50%,-50%); cursor:pointer;
+    transition:all 0.2s; z-index:10;
   }
+  .cal-dot:hover { border-color:#00d4ff; background:#00d4ff30; transform:translate(-50%,-50%) scale(1.2); }
+  .cal-dot.done { background:#00ff88; border-color:#00ff88; opacity:0.5; pointer-events:none; }
+  .cal-dot .cal-label {
+    position:absolute; top:32px; left:50%; transform:translateX(-50%);
+    font-size:9px; color:#4a4a6a; white-space:nowrap;
+  }
+  #calStatus { text-align:center; padding:12px; font-size:12px; color:var(--dim); }
+  #calDone { display:none; margin:0 auto; padding:12px 36px; background:#00ff88;
+             color:#000; border:none; border-radius:8px; font-family:'Inter';
+             font-size:14px; font-weight:700; cursor:pointer; letter-spacing:1px; }
 
-  /* ── Header ── */
-  .header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 40px;
-    background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%);
-    position: relative; z-index: 20;
-  }
-  .logo { font-size: 26px; font-weight: 800; color: var(--accent); letter-spacing: 2px; }
-  .logo span { color: var(--text); font-weight: 400; font-size: 14px; letter-spacing: 0; margin-left: 12px; }
-  .header-right { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--dim); }
-  .eeg-bar { width: 100px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
-  .eeg-fill { height: 100%; background: #00ff88; border-radius: 3px; transition: width 0.2s; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4444; }
-  .status-dot.on { background: #00ff88; box-shadow: 0 0 6px #00ff8880; }
-  .persona-badge {
-    font-size: 9px; padding: 3px 8px; border-radius: 3px;
-    background: #1a1a2e; letter-spacing: 1px; text-transform: uppercase;
-    border: 1px solid #2a2a40; transition: all 0.3s;
-  }
+  /* ── Grid ── */
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:20px; padding:0 40px; }
+  .card { position:relative; border-radius:12px; overflow:hidden; aspect-ratio:16/10;
+          background:var(--card); border:2px solid transparent;
+          transition:transform 0.25s,border-color 0.3s,box-shadow 0.3s; cursor:none; }
+  .card-gradient { position:absolute; bottom:0; left:0; right:0; height:65%;
+                   background:linear-gradient(transparent,rgba(0,0,0,0.9)); }
+  .card-info { position:absolute; bottom:0; left:0; right:0; padding:14px; }
+  .card-title { font-size:14px; font-weight:700; margin-bottom:2px; }
+  .card-meta { font-size:10px; color:var(--dim); }
+  .card.pinned { border-color:rgba(255,255,255,0.3); transform:scale(1.04);
+                 box-shadow:0 0 20px rgba(255,255,255,0.06); }
+  .card.locked { border-color:var(--accent); transform:scale(1.06);
+                 box-shadow:0 0 35px rgba(229,9,20,0.3); }
+  .card.selected { border-color:#00ff88; transform:scale(1.08);
+                   box-shadow:0 0 50px rgba(0,255,136,0.25); }
 
-  /* ── Browse Screen ── */
-  #browseScreen { display: flex; flex-direction: column; height: calc(100vh - 52px); }
-  #browseScreen.hidden { display: none; }
+  .ring-box { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+              opacity:0; transition:opacity 0.2s; pointer-events:none; }
+  .card.locked .ring-box { opacity:1; }
+  .ring-bg { fill:none; stroke:rgba(255,255,255,0.1); stroke-width:3; }
+  .ring-fg { fill:none; stroke:var(--accent); stroke-width:4; stroke-linecap:round;
+             transform:rotate(-90deg); transform-origin:center; transition:stroke-dashoffset 0.1s; }
+  .ring-pct { fill:white; font-size:14px; font-weight:700; font-family:'Inter';
+              text-anchor:middle; dominant-baseline:central; }
 
-  .hero-section {
-    padding: 20px 40px 16px;
-  }
-  .hero-section h2 { font-size: 15px; font-weight: 600; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; }
-  .hero-section p { font-size: 12px; color: #3a3a5a; margin-top: 4px; }
+  /* ── Player ── */
+  #playerScreen { display:none; height:calc(100vh - 52px); flex-direction:column; background:#000; }
+  #playerScreen.active { display:flex; }
+  .player-video { flex:1; position:relative; }
+  .player-video iframe { width:100%; height:100%; border:none; }
+  .player-overlay { position:absolute; inset:0; background:linear-gradient(transparent 60%,rgba(0,0,0,0.7));
+                    display:flex; flex-direction:column; justify-content:flex-end; padding:40px; }
+  .player-title { font-size:28px; font-weight:800; margin-bottom:8px; }
+  .player-meta { font-size:13px; color:var(--dim); }
+  .player-controls { padding:14px 40px; background:var(--surface); display:flex;
+                     align-items:center; gap:16px; border-top:1px solid var(--border); }
+  .ctrl-btn { padding:10px 24px; border-radius:8px; border:none; font-family:'Inter';
+              font-size:13px; font-weight:600; cursor:none; transition:all 0.2s; }
+  .ctrl-btn.primary { background:var(--accent); color:white; }
+  .ctrl-btn.secondary { background:var(--border); color:var(--text); }
+  .ctrl-btn.pinned { transform:scale(1.05); box-shadow:0 0 15px rgba(255,255,255,0.1); }
+  .ctrl-btn.locked { transform:scale(1.08); box-shadow:0 0 20px rgba(229,9,20,0.3); }
 
-  .grid {
-    display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 20px; padding: 0 40px; flex: 1;
-  }
+  /* ── Bottom ── */
+  .bottom { position:fixed; bottom:0; left:0; right:0; z-index:20; }
+  .narration { padding:8px 40px; background:rgba(20,20,32,0.95); border-top:1px solid #1a1a3e;
+               font-size:11px; color:#6a6a8a; font-style:italic; }
+  .np-bar { padding:10px 40px; background:var(--surface); border-top:1px solid var(--border);
+            font-size:13px; font-weight:600; }
 
-  .card {
-    position: relative; border-radius: 12px; overflow: hidden;
-    aspect-ratio: 16/10; background: var(--card);
-    border: 2px solid transparent;
-    transition: transform 0.25s ease, border-color 0.3s, box-shadow 0.3s;
-    cursor: none;
-  }
-  .card-bg {
-    width: 100%; height: 100%;
-    background-size: cover; background-position: center;
-  }
-  .card-gradient {
-    position: absolute; bottom: 0; left: 0; right: 0; height: 65%;
-    background: linear-gradient(transparent, rgba(0,0,0,0.9));
-  }
-  .card-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 16px; }
-  .card-title { font-size: 15px; font-weight: 700; margin-bottom: 3px; }
-  .card-meta { font-size: 10px; color: var(--dim); }
-  .card-desc { font-size: 10px; color: #4a4a6a; margin-top: 4px; display: none; }
-
-  .card.gaze-hover { border-color: rgba(255,255,255,0.2); transform: scale(1.03); }
-  .card.gaze-hover .card-desc { display: block; }
-  .card.gaze-focus { border-color: rgba(255,255,255,0.45); transform: scale(1.05); box-shadow: 0 0 25px rgba(255,255,255,0.08); }
-  .card.gaze-focus .card-desc { display: block; }
-  .card.gaze-locked { border-color: var(--accent); transform: scale(1.06); box-shadow: 0 0 40px var(--glow); }
-  .card.gaze-locked .card-desc { display: block; }
-  .card.gaze-selected { border-color: #00ff88; transform: scale(1.08); box-shadow: 0 0 50px rgba(0,255,136,0.25); }
-
-  .ring-container {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    opacity: 0; transition: opacity 0.2s; pointer-events: none;
-  }
-  .card.gaze-focus .ring-container,
-  .card.gaze-locked .ring-container { opacity: 1; }
-  .ring-bg { fill: none; stroke: rgba(255,255,255,0.12); stroke-width: 3; }
-  .ring-fg {
-    fill: none; stroke: white; stroke-width: 4; stroke-linecap: round;
-    transform: rotate(-90deg); transform-origin: center; transition: stroke-dashoffset 0.1s, stroke 0.2s;
-  }
-  .card.gaze-locked .ring-fg { stroke: var(--accent); filter: drop-shadow(0 0 6px var(--glow)); }
-  .ring-pct { fill: white; font-size: 14px; font-weight: 700; font-family: 'Inter'; text-anchor: middle; dominant-baseline: central; }
-
-  /* ── Player Screen ── */
-  #playerScreen { display: none; height: calc(100vh - 52px); flex-direction: column; background: #000; }
-  #playerScreen.active { display: flex; }
-
-  .player-video {
-    flex: 1; display: flex; align-items: center; justify-content: center;
-    position: relative; overflow: hidden;
-  }
-  .player-video video {
-    width: 100%; height: 100%; object-fit: cover;
-  }
-  .player-video iframe {
-    width: 100%; height: 100%; border: none;
-  }
-
-  .player-overlay {
-    position: absolute; inset: 0;
-    background: linear-gradient(transparent 60%, rgba(0,0,0,0.7));
-    display: flex; flex-direction: column; justify-content: flex-end;
-    padding: 40px; transition: opacity 0.3s;
-  }
-  .player-title { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
-  .player-meta { font-size: 13px; color: var(--dim); margin-bottom: 16px; }
-  .player-desc { font-size: 13px; color: #8888aa; max-width: 600px; line-height: 1.6; }
-
-  .player-controls {
-    padding: 16px 40px;
-    background: var(--surface);
-    display: flex; align-items: center; gap: 20px;
-    border-top: 1px solid var(--border);
-  }
-  .ctrl-btn {
-    padding: 10px 24px; border-radius: 8px; border: none;
-    font-family: 'Inter'; font-size: 13px; font-weight: 600;
-    cursor: none; transition: all 0.2s; letter-spacing: 0.5px;
-    position: relative;
-  }
-  .ctrl-btn.primary { background: var(--accent); color: white; }
-  .ctrl-btn.secondary { background: var(--border); color: var(--text); }
-  .ctrl-btn.gaze-hover { transform: scale(1.05); box-shadow: 0 0 15px rgba(255,255,255,0.1); }
-  .ctrl-btn.gaze-focus { transform: scale(1.08); box-shadow: 0 0 20px rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); }
-  .ctrl-btn.gaze-locked { transform: scale(1.1); box-shadow: 0 0 25px var(--glow); }
-
-  .ctrl-ring {
-    position: absolute; top: -8px; right: -8px; width: 24px; height: 24px;
-    opacity: 0; transition: opacity 0.2s;
-  }
-  .ctrl-btn.gaze-focus .ctrl-ring,
-  .ctrl-btn.gaze-locked .ctrl-ring { opacity: 1; }
-
-  .player-brain {
-    margin-left: auto; display: flex; align-items: center; gap: 12px;
-    font-size: 11px; color: var(--dim);
-  }
-
-  /* No gaze dot — elements highlight directly, Apple Vision Pro style */
-
-  .flash { position: fixed; inset: 0; background: rgba(0,255,136,0.06); z-index: 999; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
-  .flash.active { opacity: 1; }
-
-  /* ── Narration + Now Playing ── */
-  .bottom-bar {
-    position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
-    display: flex; flex-direction: column;
-  }
-  .narration-bar {
-    padding: 8px 40px; background: rgba(20,20,32,0.95);
-    border-top: 1px solid #1a1a3e;
-    display: flex; align-items: center; justify-content: space-between;
-  }
-  #narration { font-size: 11px; color: #6a6a8a; font-style: italic; flex: 1; }
-  #sessionInfo { font-size: 9px; color: #3a3a5a; }
-
-  .now-playing-bar {
-    padding: 10px 40px; background: var(--surface);
-    border-top: 1px solid var(--border);
-    display: flex; align-items: center; gap: 16px;
-  }
-  .np-title { font-size: 13px; font-weight: 600; flex: 1; }
-  .np-status { font-size: 11px; color: var(--dim); }
-  .np-empty { color: #3a3a5a; font-style: italic; }
+  .flash { position:fixed; inset:0; background:rgba(0,255,136,0.06); z-index:999;
+           opacity:0; pointer-events:none; transition:opacity 0.3s; }
+  .flash.active { opacity:1; }
 </style>
 </head>
 <body>
 
 <div class="flash" id="flash"></div>
-<!-- No gaze dot — highlights guide the user, not a jittery cursor -->
 
-<!-- Header -->
+<!-- ═══ CALIBRATION ═══ -->
+<div id="calScreen">
+  <div class="cal-header">
+    <h2>GAZE CALIBRATION</h2>
+    <p>Click each dot while looking directly at it. They're placed at the card positions.</p>
+  </div>
+  <div class="cal-area" id="calArea"></div>
+  <div id="calStatus">0 points collected</div>
+  <button id="calDone" onclick="finishCal()">START WATCHING</button>
+</div>
+
 <div class="header">
   <div class="logo">AXIOM<span>mind-controlled streaming</span></div>
   <div class="header-right">
-    <span class="persona-badge" id="personaLabel">--</span>
     <span id="engLabel">--</span>
-    <div class="eeg-bar"><div class="eeg-fill" id="eegFill" style="width:50%"></div></div>
-    <span id="rlLabel" style="font-size:10px">RL: --</span>
-    <span id="threshLabel" style="font-size:10px">θ: --</span>
-    <div class="status-dot" id="statusDot"></div>
+    <div class="eeg-bar"><div class="eeg-fill" id="eegFill" style="width:0"></div></div>
+    <span id="actionCount">0</span>
+    <div class="dot" id="statusDot"></div>
   </div>
 </div>
 
-<!-- ═══ BROWSE SCREEN ═══ -->
+<!-- ═══ BROWSE ═══ -->
 <div id="browseScreen">
-  <div class="hero-section">
-    <h2>Trending Now</h2>
-    <p>Look at a title. Focus to select it. Your brain controls the interface.</p>
+  <div style="padding:16px 40px 12px">
+    <div style="font-size:14px;font-weight:600;color:var(--dim);letter-spacing:1px;text-transform:uppercase">Trending Now</div>
   </div>
   <div class="grid" id="grid"></div>
 </div>
 
-<!-- ═══ PLAYER SCREEN ═══ -->
+<!-- ═══ PLAYER ═══ -->
 <div id="playerScreen">
-  <div class="player-video" id="playerVideo">
-    <!-- Video or poster will be inserted here -->
-  </div>
+  <div class="player-video" id="playerVideo"></div>
   <div class="player-controls" id="playerControls">
-    <div class="ctrl-btn primary" id="btnPlayPause" data-action="playpause">
-      ▶ Play
-      <svg class="ctrl-ring" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="white" stroke-width="2" stroke-dasharray="62.8" stroke-dashoffset="62.8" transform="rotate(-90 12 12)"/></svg>
-    </div>
-    <div class="ctrl-btn secondary" id="btnBack" data-action="back">
-      ← Back to Browse
-      <svg class="ctrl-ring" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="white" stroke-width="2" stroke-dasharray="62.8" stroke-dashoffset="62.8" transform="rotate(-90 12 12)"/></svg>
-    </div>
-    <div class="player-brain">
-      <span id="playerEngagement">--</span>
-      <span id="playerPersona">--</span>
-    </div>
+    <div class="ctrl-btn primary" id="btnPlay" data-action="play">▶ Play</div>
+    <div class="ctrl-btn secondary" id="btnBack" data-action="back">← Back</div>
+    <div style="margin-left:auto;font-size:11px;color:var(--dim)" id="playerEng">--</div>
   </div>
 </div>
 
-<!-- Bottom bars -->
-<div class="bottom-bar">
-  <div class="narration-bar">
-    <div id="narration">Initializing AXIOM...</div>
-    <div id="sessionInfo"></div>
-  </div>
-  <div class="now-playing-bar">
-    <div class="np-title" id="npTitle"><span class="np-empty">Nothing playing — select a title with your gaze</span></div>
-    <div class="np-status" id="npStatus"></div>
-  </div>
+<div class="bottom">
+  <div class="narration" id="narration">Open the page and calibrate to begin.</div>
+  <div class="np-bar" id="npBar" style="color:#3a3a5a;font-style:italic">Nothing playing</div>
 </div>
 
 <script>
+const CIRC = 2 * Math.PI * 28;
 const MOVIES = [
-  { id:"m1", title:"Neural Drift",     year:"2026", rating:"TV-MA", color:"#1a0a2e",
-    desc:"A neuroscientist discovers she can read minds through a consumer EEG device — but the signals are coming from somewhere else.",
+  { id:"m1", title:"Neural Drift",    year:"2026", rating:"TV-MA", color:"#1a0a2e",
     video:"https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&controls=0" },
-  { id:"m2", title:"The Last Signal",  year:"2025", rating:"PG-13", color:"#0a1a2e",
-    desc:"When Earth's last radio telescope picks up a pattern in deep space noise, one intern realizes it matches human brainwaves.",
+  { id:"m2", title:"The Last Signal", year:"2025", rating:"PG-13", color:"#0a1a2e",
     video:"https://www.youtube.com/embed/jNQXAC9IVRw?autoplay=1&mute=1&controls=0" },
-  { id:"m3", title:"Cortex",           year:"2026", rating:"R",     color:"#2e1a0a",
-    desc:"In a world where memories can be extracted and traded, a black-market dealer discovers a memory that could end civilization.",
+  { id:"m3", title:"Cortex",          year:"2026", rating:"R",     color:"#2e1a0a",
     video:"https://www.youtube.com/embed/LXb3EKWsInQ?autoplay=1&mute=1&controls=0" },
-  { id:"m4", title:"Mind Gate",        year:"2024", rating:"TV-14", color:"#0a2e1a",
-    desc:"A brain-computer interface startup goes public — then their users start sharing dreams involuntarily.",
+  { id:"m4", title:"Mind Gate",       year:"2024", rating:"TV-14", color:"#0a2e1a",
     video:"https://www.youtube.com/embed/ScMzIvxBSi4?autoplay=1&mute=1&controls=0" },
-  { id:"m5", title:"Brainwave",        year:"2026", rating:"PG-13", color:"#2e0a1a",
-    desc:"An athlete banned from competition learns to control machines with her mind, entering the underground BCI racing circuit.",
+  { id:"m5", title:"Brainwave",       year:"2026", rating:"PG-13", color:"#2e0a1a",
     video:"https://www.youtube.com/embed/1La4QzGeaaQ?autoplay=1&mute=1&controls=0" },
-  { id:"m6", title:"Synaptic",         year:"2025", rating:"TV-MA", color:"#1a2e0a",
-    desc:"Two strangers realize their neural implants have been secretly connected. Every thought is shared. Every secret exposed.",
+  { id:"m6", title:"Synaptic",        year:"2025", rating:"TV-MA", color:"#1a2e0a",
     video:"https://www.youtube.com/embed/hHW1oY26kxQ?autoplay=1&mute=1&controls=0" },
-  { id:"m7", title:"The Interface",    year:"2026", rating:"R",     color:"#0a0a2e",
-    desc:"A rogue AI teaches itself to speak directly to human neurons. The question isn't whether it works — it's whether you can tell the difference.",
+  { id:"m7", title:"The Interface",   year:"2026", rating:"R",     color:"#0a0a2e",
     video:"https://www.youtube.com/embed/ZRCdORJiUgU?autoplay=1&mute=1&controls=0" },
-  { id:"m8", title:"Echo Protocol",    year:"2024", rating:"TV-14", color:"#2e2e0a",
-    desc:"When a classified military BCI program is leaked, every soldier with an implant becomes a potential weapon — or a potential victim.",
+  { id:"m8", title:"Echo Protocol",   year:"2024", rating:"TV-14", color:"#2e2e0a",
     video:"https://www.youtube.com/embed/d1YBv2mWll0?autoplay=1&mute=1&controls=0" },
 ];
 
-const CIRC = 2 * Math.PI * 28;
-const CTRL_CIRC = 2 * Math.PI * 10;
-let currentScreen = 'browse';
+let currentScreen = 'cal';
 let currentMovie = null;
 let isPlaying = false;
+let calCount = 0;
 
-// Build cards
+// Build movie cards
 const grid = document.getElementById('grid');
 MOVIES.forEach(m => {
   const card = document.createElement('div');
-  card.className = 'card';
-  card.id = m.id;
-  card.dataset.title = m.title;
+  card.className = 'card'; card.id = m.id; card.dataset.title = m.title;
   card.innerHTML = `
-    <div class="card-bg" style="background:linear-gradient(135deg, ${m.color}, ${m.color}dd, #0a0a15);"></div>
+    <div style="width:100%;height:100%;background:linear-gradient(135deg,${m.color},${m.color}dd,#0a0a15)"></div>
     <div class="card-gradient"></div>
-    <div class="card-info">
-      <div class="card-title">${m.title}</div>
-      <div class="card-meta">${m.year} · ${m.rating}</div>
-      <div class="card-desc">${m.desc.slice(0, 80)}...</div>
-    </div>
-    <div class="ring-container">
-      <svg width="70" height="70" viewBox="0 0 70 70">
-        <circle class="ring-bg" cx="35" cy="35" r="28"/>
-        <circle class="ring-fg" cx="35" cy="35" r="28" stroke-dasharray="${CIRC}" stroke-dashoffset="${CIRC}"/>
-        <text class="ring-pct" x="35" y="35">0%</text>
-      </svg>
-    </div>
-  `;
+    <div class="card-info"><div class="card-title">${m.title}</div><div class="card-meta">${m.year} · ${m.rating}</div></div>
+    <div class="ring-box"><svg width="70" height="70" viewBox="0 0 70 70">
+      <circle class="ring-bg" cx="35" cy="35" r="28"/>
+      <circle class="ring-fg" cx="35" cy="35" r="28" stroke-dasharray="${CIRC}" stroke-dashoffset="${CIRC}"/>
+      <text class="ring-pct" x="35" y="35"></text>
+    </svg></div>`;
   grid.appendChild(card);
 });
 
-function showPlayer(movie) {
-  currentMovie = movie;
-  currentScreen = 'player';
-  isPlaying = false;
+// ── Calibration dots — placed at card centers + corners ──
+function buildCalDots() {
+  const area = document.getElementById('calArea');
+  const dots = [];
 
-  document.getElementById('browseScreen').classList.add('hidden');
-  document.getElementById('playerScreen').classList.add('active');
+  // 4 corners + center
+  [[5,5],[95,5],[5,90],[95,90],[50,50]].forEach(([xp,yp], i) => {
+    dots.push({ x: xp + '%', y: yp + '%', label: ['TL','TR','BL','BR','C'][i] });
+  });
 
-  const pv = document.getElementById('playerVideo');
-  pv.innerHTML = `
-    <div class="player-overlay" id="playerOverlay">
-      <div class="player-title">${movie.title}</div>
-      <div class="player-meta">${movie.year} · ${movie.rating} · 2h 14m</div>
-      <div class="player-desc">${movie.desc}</div>
-    </div>
-  `;
-  pv.style.background = `linear-gradient(135deg, ${movie.color}, #0a0a15)`;
+  // Card centers — after the grid has rendered
+  setTimeout(() => {
+    document.querySelectorAll('.card').forEach((card, i) => {
+      const r = card.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const d = document.createElement('div');
+      d.className = 'cal-dot';
+      d.style.left = cx + 'px'; d.style.top = cy + 'px';
+      d.innerHTML = `<span class="cal-label">${MOVIES[i].title}</span>`;
+      d.onclick = () => calClick(d, cx, cy);
+      area.appendChild(d);
+    });
+  }, 300);
 
-  document.getElementById('btnPlayPause').textContent = '▶ Play';
-  document.getElementById('npTitle').textContent = `Selected: ${movie.title}`;
-  document.getElementById('npStatus').textContent = 'Look at Play to start';
-
-  // Re-register elements (player controls)
-  setTimeout(registerElements, 300);
+  // Corner dots (percentage-based)
+  dots.forEach(({x, y, label}) => {
+    const d = document.createElement('div');
+    d.className = 'cal-dot';
+    d.style.left = x; d.style.top = y;
+    d.innerHTML = `<span class="cal-label">${label}</span>`;
+    d.onclick = function() {
+      const r = this.getBoundingClientRect();
+      calClick(this, r.left + r.width/2, r.top + r.height/2);
+    };
+    area.appendChild(d);
+  });
 }
 
-function togglePlay() {
-  const pv = document.getElementById('playerVideo');
-  const overlay = document.getElementById('playerOverlay');
+function calClick(dot, viewX, viewY) {
+  // Convert viewport to screen coordinates
+  const screenX = viewX + window.screenX;
+  const screenY = viewY + window.screenY + (window.outerHeight - window.innerHeight);
 
-  if (!isPlaying) {
-    isPlaying = true;
-    pv.innerHTML = `<iframe src="${currentMovie.video}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
-    document.getElementById('btnPlayPause').textContent = '⏸ Pause';
-    document.getElementById('npTitle').textContent = `▶ Playing: ${currentMovie.title}`;
-    document.getElementById('npStatus').textContent = 'Focus on Pause to stop. Relax to auto-pause.';
-  } else {
-    isPlaying = false;
-    pv.innerHTML = `
-      <div class="player-overlay" id="playerOverlay">
-        <div class="player-title">${currentMovie.title}</div>
-        <div class="player-meta">${currentMovie.year} · ${currentMovie.rating} · 2h 14m</div>
-        <div class="player-desc">${currentMovie.desc}</div>
-      </div>
-    `;
-    pv.style.background = `linear-gradient(135deg, ${currentMovie.color}, #0a0a15)`;
-    document.getElementById('btnPlayPause').textContent = '▶ Play';
-    document.getElementById('npTitle').textContent = `Paused: ${currentMovie.title}`;
-    document.getElementById('npStatus').textContent = 'Focus on Play to resume';
+  dot.classList.add('done');
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'cal_point', screen_x: screenX, screen_y: screenY }));
+  }
+  calCount++;
+  document.getElementById('calStatus').textContent = calCount + ' points collected';
+  if (calCount >= 9) {
+    document.getElementById('calDone').style.display = 'block';
   }
 }
 
-function backToBrowse() {
+function finishCal() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'cal_done' }));
+  }
+}
+
+function enterBrowse() {
   currentScreen = 'browse';
-  currentMovie = null;
-  isPlaying = false;
-  document.getElementById('playerScreen').classList.remove('active');
-  document.getElementById('browseScreen').classList.remove('hidden');
-  document.getElementById('playerVideo').innerHTML = '';
-  document.getElementById('npTitle').innerHTML = '<span class="np-empty">Nothing playing — select a title</span>';
-  document.getElementById('npStatus').textContent = '';
+  document.getElementById('calScreen').classList.add('done');
   setTimeout(registerElements, 300);
 }
 
-// Register elements with Python server
+// ── Element registration ──
 function registerElements() {
   const elements = [];
   if (currentScreen === 'browse') {
     document.querySelectorAll('.card').forEach(card => {
       const r = card.getBoundingClientRect();
-      elements.push({ id: card.id, label: card.dataset.title || card.id,
-                       x: Math.round(r.left), y: Math.round(r.top),
-                       w: Math.round(r.width), h: Math.round(r.height) });
+      elements.push({ id:card.id, label:card.dataset.title||card.id,
+                       x:Math.round(r.left), y:Math.round(r.top),
+                       w:Math.round(r.width), h:Math.round(r.height) });
     });
-  } else {
+  } else if (currentScreen === 'player') {
     document.querySelectorAll('.ctrl-btn').forEach(btn => {
       const r = btn.getBoundingClientRect();
-      elements.push({ id: btn.id, label: btn.dataset.action,
-                       x: Math.round(r.left), y: Math.round(r.top),
-                       w: Math.round(r.width), h: Math.round(r.height) });
+      elements.push({ id:btn.id, label:btn.dataset.action,
+                       x:Math.round(r.left), y:Math.round(r.top),
+                       w:Math.round(r.width), h:Math.round(r.height) });
     });
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
-    const chromeHeight = window.outerHeight - window.innerHeight;
-    ws.send(JSON.stringify({
-      type: 'register_elements', elements, page_title: document.title,
-      window_x: window.screenX, window_y: window.screenY, chrome_height: chromeHeight,
-    }));
+    const ch = window.outerHeight - window.innerHeight;
+    ws.send(JSON.stringify({ type:'register_elements', elements,
+      window_x:window.screenX, window_y:window.screenY, chrome_height:ch }));
   }
 }
 
-// WebSocket
+// ── Player ──
+function showPlayer(movie) {
+  currentMovie = movie; currentScreen = 'player'; isPlaying = false;
+  document.getElementById('browseScreen').style.display = 'none';
+  document.getElementById('playerScreen').classList.add('active');
+  document.getElementById('playerVideo').innerHTML = `
+    <div class="player-overlay"><div class="player-title">${movie.title}</div>
+    <div class="player-meta">${movie.year} · ${movie.rating} · 2h 14m</div></div>`;
+  document.getElementById('playerVideo').style.background = `linear-gradient(135deg,${movie.color},#0a0a15)`;
+  document.getElementById('btnPlay').textContent = '▶ Play';
+  document.getElementById('npBar').textContent = `Selected: ${movie.title}`;
+  document.getElementById('npBar').style.color = 'var(--text)';
+  setTimeout(registerElements, 300);
+}
+
+function togglePlay() {
+  const pv = document.getElementById('playerVideo');
+  if (!isPlaying) {
+    isPlaying = true;
+    pv.innerHTML = `<iframe src="${currentMovie.video}" allow="autoplay;encrypted-media" allowfullscreen></iframe>`;
+    document.getElementById('btnPlay').textContent = '⏸ Pause';
+    document.getElementById('npBar').textContent = `▶ Playing: ${currentMovie.title}`;
+  } else {
+    isPlaying = false;
+    pv.innerHTML = `<div class="player-overlay"><div class="player-title">${currentMovie.title}</div></div>`;
+    pv.style.background = `linear-gradient(135deg,${currentMovie.color},#0a0a15)`;
+    document.getElementById('btnPlay').textContent = '▶ Play';
+    document.getElementById('npBar').textContent = `Paused: ${currentMovie.title}`;
+  }
+}
+
+function backToBrowse() {
+  currentScreen = 'browse'; currentMovie = null; isPlaying = false;
+  document.getElementById('playerScreen').classList.remove('active');
+  document.getElementById('browseScreen').style.display = '';
+  document.getElementById('playerVideo').innerHTML = '';
+  document.getElementById('npBar').innerHTML = '<span style="color:#3a3a5a;font-style:italic">Nothing playing</span>';
+  setTimeout(registerElements, 300);
+}
+
+// ── WebSocket ──
 let ws;
 function connect() {
   ws = new WebSocket('ws://127.0.0.1:8091');
   ws.onopen = () => {
     document.getElementById('statusDot').classList.add('on');
-    setTimeout(registerElements, 500);
-    window.addEventListener('resize', () => setTimeout(registerElements, 300));
-    // Re-register if window moves (coordinates change)
-    let lastX = window.screenX, lastY = window.screenY;
+    // Re-register on window move
+    let lx = window.screenX, ly = window.screenY;
     setInterval(() => {
-      if (window.screenX !== lastX || window.screenY !== lastY) {
-        lastX = window.screenX; lastY = window.screenY;
-        registerElements();
+      if (window.screenX !== lx || window.screenY !== ly) {
+        lx = window.screenX; ly = window.screenY;
+        if (currentScreen !== 'cal') registerElements();
       }
     }, 1000);
   };
-  ws.onclose = () => {
-    document.getElementById('statusDot').classList.remove('on');
-    setTimeout(connect, 2000);
-  };
+  ws.onclose = () => { document.getElementById('statusDot').classList.remove('on'); setTimeout(connect, 2000); };
   ws.onmessage = (e) => {
     const d = JSON.parse(e.data);
+
+    if (d.type === 'init') {
+      if (d.calibrated) enterBrowse();
+      return;
+    }
+    if (d.type === 'cal_ack') return;
+    if (d.type === 'cal_complete') { enterBrowse(); return; }
+    if (d.type === 'cal_error') { alert(d.msg); return; }
     if (d.type !== 'state') return;
 
-    // Header stats
+    // Header
     const eng = d.engagement;
-    document.getElementById('engLabel').textContent = `${(eng*100).toFixed(0)}%`;
-    document.getElementById('eegFill').style.width = (eng * 100) + '%';
-    document.getElementById('eegFill').style.background = eng > 0.6 ? '#00ff88' : '#00aaff';
-    const personaColors = {focused:'#00ff88', browsing:'#00aaff', deciding:'#ffaa00', confused:'#ff4444'};
-    const pl = document.getElementById('personaLabel');
-    pl.textContent = d.brain_persona || '--';
-    pl.style.color = personaColors[d.brain_persona] || '#6a6a8a';
-    pl.style.borderColor = personaColors[d.brain_persona] || '#2a2a40';
-    document.getElementById('rlLabel').textContent = `RL:${(d.bandit_avg_reward||0).toFixed(2)}`;
-    document.getElementById('threshLabel').textContent = `θ:${(d.threshold||0.75).toFixed(2)}`;
-
-    // Player brain stats
-    if (currentScreen === 'player') {
-      document.getElementById('playerEngagement').textContent = `Focus: ${(eng*100).toFixed(0)}%`;
-      document.getElementById('playerPersona').textContent = d.brain_persona;
+    if (eng != null) {
+      document.getElementById('engLabel').textContent = `${(eng*100).toFixed(0)}%`;
+      document.getElementById('eegFill').style.width = (Math.min(eng,1)*100) + '%';
     }
+    document.getElementById('actionCount').textContent = d.action_count;
 
-    // Element highlighting — sticky, element-based, no cursor
-    if (currentScreen === 'browse') {
-      document.querySelectorAll('.card').forEach(card => {
-        const el = d.elements[card.id];
-        card.classList.remove('gaze-hover', 'gaze-focus', 'gaze-locked', 'gaze-selected');
-        if (!el) return;
-        const c = el.confidence;
-
-        // Pinned = immediately highlighted (sticky)
-        // Confidence determines the intensity level
-        if (el.pinned) {
-          if (c >= 0.60) card.classList.add('gaze-locked');
-          else if (c >= 0.25) card.classList.add('gaze-focus');
-          else card.classList.add('gaze-hover');
+    // Elements
+    const allEls = currentScreen === 'browse' ? '.card' : '.ctrl-btn';
+    document.querySelectorAll(allEls).forEach(el => {
+      const s = d.elements[el.id];
+      el.classList.remove('pinned', 'locked', 'selected');
+      if (!s) return;
+      if (s.pinned) {
+        el.classList.add(s.confidence >= 0.55 ? 'locked' : 'pinned');
+        const ring = el.querySelector('.ring-fg');
+        const pct = el.querySelector('.ring-pct');
+        if (ring) {
+          ring.setAttribute('stroke-dashoffset', CIRC * (1 - Math.min(1, s.confidence / 0.75)));
+          pct.textContent = Math.round(s.confidence * 100) + '%';
         }
-
-        // Ring shows selection progress
-        const ring = card.querySelector('.ring-fg');
-        const pct = card.querySelector('.ring-pct');
-        if (ring && el.pinned && c >= 0.2) {
-          ring.setAttribute('stroke-dashoffset', CIRC * (1 - Math.min(1, c / 0.75)));
-          pct.textContent = Math.round(c * 100) + '%';
-        } else if (ring) {
-          ring.setAttribute('stroke-dashoffset', CIRC);
-          pct.textContent = '';
-        }
-      });
-    } else {
-      document.querySelectorAll('.ctrl-btn').forEach(btn => {
-        const el = d.elements[btn.id];
-        btn.classList.remove('gaze-hover', 'gaze-focus', 'gaze-locked');
-        if (!el) return;
-        const c = el.confidence;
-
-        if (el.pinned) {
-          if (c >= 0.60) btn.classList.add('gaze-locked');
-          else if (c >= 0.25) btn.classList.add('gaze-focus');
-          else btn.classList.add('gaze-hover');
-        }
-
-        const ring = btn.querySelector('.ctrl-ring circle');
-        if (ring && el.pinned && c >= 0.2) {
-          ring.setAttribute('stroke-dashoffset', CTRL_CIRC * (1 - Math.min(1, c / 0.75)));
-        } else if (ring) {
-          ring.setAttribute('stroke-dashoffset', CTRL_CIRC);
-        }
-      });
-    }
+      } else {
+        const ring = el.querySelector('.ring-fg');
+        const pct = el.querySelector('.ring-pct');
+        if (ring) { ring.setAttribute('stroke-dashoffset', CIRC); pct.textContent = ''; }
+      }
+    });
 
     // Narration
     const narr = document.getElementById('narration');
-    const topEl = Object.entries(d.elements || {}).sort((a,b) => b[1].confidence - a[1].confidence)[0];
-
+    const top = Object.entries(d.elements||{}).sort((a,b) => b[1].confidence - a[1].confidence)[0];
     if (d.selected) {
-      narr.textContent = `Selected! Persona: ${d.brain_persona} | RL reward: ${d.bandit_avg_reward} | Threshold: ${d.threshold}`;
+      narr.textContent = 'Selected! ' + (d.engagement != null ? `Engagement: ${(d.engagement*100).toFixed(0)}%` : '');
       narr.style.color = '#00ff88';
-    } else if (topEl && topEl[1].confidence > 0.4) {
-      const label = topEl[0];
-      const el = document.getElementById(label);
-      const name = el ? (el.dataset.title || el.dataset.action || label) : label;
-      narr.textContent = `Focused on "${name}" (${(topEl[1].confidence*100).toFixed(0)}%). Brain: ${d.brain_persona}. Focus to select.`;
+    } else if (top && top[1].pinned) {
+      const el = document.getElementById(top[0]);
+      const name = el ? (el.dataset.title || el.dataset.action || top[0]) : top[0];
+      narr.textContent = `Looking at "${name}" — ${Math.round(top[1].confidence*100)}% confidence`;
       narr.style.color = '#8888aa';
-    } else if (d.brain_persona === 'confused') {
-      narr.textContent = 'High cognitive load detected. Slowing selection sensitivity.';
-      narr.style.color = '#ff8844';
-    } else if (d.brain_persona === 'focused') {
-      narr.textContent = 'High focus detected. Ready for selection.';
-      narr.style.color = '#00aaff';
     } else {
-      narr.textContent = currentScreen === 'browse'
-        ? 'Browsing mode. Look at a title and focus to select.'
-        : 'Player active. Look at controls and focus to interact.';
+      narr.textContent = currentScreen === 'browse' ? 'Look at a title to highlight it.' : 'Look at a control.';
       narr.style.color = '#6a6a8a';
     }
-    document.getElementById('sessionInfo').textContent =
-      `${d.session_id||'--'} | Redis:${d.has_redis?'ON':'OFF'} | Actions:${d.action_count}`;
 
-    // Handle selection
+    // Selection
     if (d.selected) {
-      const flash = document.getElementById('flash');
-      flash.classList.add('active');
-      setTimeout(() => flash.classList.remove('active'), 400);
+      document.getElementById('flash').classList.add('active');
+      setTimeout(() => document.getElementById('flash').classList.remove('active'), 400);
 
       if (currentScreen === 'browse') {
         const card = document.getElementById(d.selected);
-        if (card) {
-          card.classList.add('gaze-selected');
-          const movie = MOVIES.find(m => m.id === d.selected);
-          if (movie) {
-            setTimeout(() => showPlayer(movie), 800);
-          }
-          setTimeout(() => card.classList.remove('gaze-selected'), 2000);
-        }
+        if (card) { card.classList.add('selected'); setTimeout(() => card.classList.remove('selected'), 2000); }
+        const movie = MOVIES.find(m => m.id === d.selected);
+        if (movie) setTimeout(() => showPlayer(movie), 800);
       } else {
-        // Player controls
-        if (d.selected === 'btnPlayPause') togglePlay();
+        if (d.selected === 'btnPlay') togglePlay();
         else if (d.selected === 'btnBack') backToBrowse();
       }
+    }
+
+    if (currentScreen === 'player' && eng != null) {
+      document.getElementById('playerEng').textContent = `Focus: ${(eng*100).toFixed(0)}%`;
     }
   };
 }
 
+buildCalDots();
 connect();
 </script>
 </body>
