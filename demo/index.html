@@ -391,7 +391,11 @@ function registerElements() {
     });
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'register_elements', elements, page_title: document.title }));
+    const chromeHeight = window.outerHeight - window.innerHeight;
+    ws.send(JSON.stringify({
+      type: 'register_elements', elements, page_title: document.title,
+      window_x: window.screenX, window_y: window.screenY, chrome_height: chromeHeight,
+    }));
   }
 }
 
@@ -403,6 +407,14 @@ function connect() {
     document.getElementById('statusDot').classList.add('on');
     setTimeout(registerElements, 500);
     window.addEventListener('resize', () => setTimeout(registerElements, 300));
+    // Re-register if window moves (coordinates change)
+    let lastX = window.screenX, lastY = window.screenY;
+    setInterval(() => {
+      if (window.screenX !== lastX || window.screenY !== lastY) {
+        lastX = window.screenX; lastY = window.screenY;
+        registerElements();
+      }
+    }, 1000);
   };
   ws.onclose = () => {
     document.getElementById('statusDot').classList.remove('on');

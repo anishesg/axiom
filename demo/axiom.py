@@ -398,8 +398,9 @@ class LinUCBBandit:
 # ATTENTION ENGINE (proven from gaze-select)
 # ═════════════════════════════════════════════════════════════
 
-MOTOR_PAD = 90
+MOTOR_PAD = 50   # reduced — was causing overlapping hit zones with 20px gaps
 EXIT_DELAY = 0.4  # sticky — don't unhighlight for 400ms
+SWITCH_MIN_DIST = 60  # minimum distance from current pin before switching to new element
 
 class ElementState:
     def __init__(self, id, x, y, w, h):
@@ -431,10 +432,18 @@ class AttentionEngine:
     """
 
     def __init__(self, n_elements):
-        self.dwell_weight = 0.30
-        self.stability_weight = 0.20
-        self.proximity_weight = 0.15
-        self.eeg_weight = 0.35
+        has_eeg = USE_EEG and is_bridge_running() if USE_EEG else False
+        if has_eeg:
+            self.dwell_weight = 0.30
+            self.stability_weight = 0.20
+            self.proximity_weight = 0.15
+            self.eeg_weight = 0.35
+        else:
+            # No EEG — redistribute weight to gaze signals
+            self.dwell_weight = 0.45
+            self.stability_weight = 0.30
+            self.proximity_weight = 0.25
+            self.eeg_weight = 0.0
         self.dwell_saturate = 1.8 * (1 + max(0, math.log2(max(1, n_elements) / 4)))
         self.select_threshold = 0.75
         self.decay_rate = 0.94  # slower decay — stickier
@@ -481,17 +490,26 @@ class AttentionEngine:
         if nearest_id is not None:
             self.empty_gaze_since = 0
             if nearest_id != self.pinned_id:
-                # User moved to a different element — switch immediately
+                # Only switch if gaze has moved meaningfully away from current pin
+                should_switch = True
                 if self.pinned_id and self.pinned_id in elements:
-                    elements[self.pinned_id].gaze_in = False
-                    elements[self.pinned_id].dwell_time = 0
-                self.pinned_id = nearest_id
-                self.pinned_since = now
-                el = elements[nearest_id]
-                el.gaze_in = True
-                el.last_enter = now
-                el.dwell_time = 0
-                el.highlighted = True
+                    pinned_el = elements[self.pinned_id]
+                    dist_from_pinned = math.hypot(gaze_x - pinned_el.cx, gaze_y - pinned_el.cy)
+                    # Stay on current pin if gaze hasn't moved far enough
+                    if dist_from_pinned < SWITCH_MIN_DIST:
+                        should_switch = False
+
+                if should_switch:
+                    if self.pinned_id and self.pinned_id in elements:
+                        elements[self.pinned_id].gaze_in = False
+                        elements[self.pinned_id].dwell_time = 0
+                    self.pinned_id = nearest_id
+                    self.pinned_since = now
+                    el = elements[nearest_id]
+                    el.gaze_in = True
+                    el.last_enter = now
+                    el.dwell_time = 0
+                    el.highlighted = True
         else:
             # Gaze is in empty space
             if self.empty_gaze_since == 0:
@@ -718,13 +736,15 @@ def perception_loop(cam_idx, gaze_estimator, eeg):
     filter_x = OneEuroFilter(min_cutoff=0.8, beta=0.008)
     filter_y = OneEuroFilter(min_cutoff=0.8, beta=0.008)
     eng_history = deque(maxlen=15)
+    eeg_tick = 0  # process EEG every 3rd frame to not block gaze
 
     cap = cv2.VideoCapture(cam_idx)
     print("[PERCEPTION] Started", flush=True)
 
     while shared_state["ready"]:
-        # EEG
-        if eeg:
+        # EEG — process every 3rd frame (~10Hz) to not block gaze (~30Hz)
+        eeg_tick += 1
+        if eeg and eeg_tick % 3 == 0:
             eeg.pull()
             w = eeg.get_window(2.0)
             brain = compute_brain_state(w)
@@ -735,7 +755,7 @@ def perception_loop(cam_idx, gaze_estimator, eeg):
             persona_name, _ = get_brain_persona(brain)
             shared_state["brain_persona"] = persona_name
 
-            # Publish to Redis for multi-agent consumption
+            # Publish to Redis (non-blocking)
             brain_bus.publish_brain_state(brain, shared_state["gaze_x"],
                                           shared_state["gaze_y"],
                                           shared_state["engagement"])
@@ -746,8 +766,10 @@ def perception_loop(cam_idx, gaze_estimator, eeg):
                 print(f"[DRIFT] Engagement drifted {drift['direction']} "
                       f"(z={drift['z_score']:.1f}, baseline={drift['baseline_mean']:.3f}, "
                       f"current={drift['current']:.3f})", flush=True)
+        elif eeg and eeg_tick % 3 == 1:
+            eeg.pull()  # still pull samples to keep buffer fresh
 
-            # ErrP check after actions
+            # ErrP check after actions (runs on non-EEG frames for speed)
             if shared_state["last_action_time"] > 0:
                 errp = detect_errp(w, shared_state["last_action_time"])
                 elapsed = time.time() - shared_state["last_action_time"]
@@ -850,10 +872,19 @@ async def ws_handler(websocket):
         async for msg in websocket:
             data = json.loads(msg)
             if data.get("type") == "register_elements":
+                # Browser sends viewport-relative coords. We need screen-absolute.
+                # The browser also sends its window position via screenX/screenY.
+                win_x = data.get("window_x", 0)
+                win_y = data.get("window_y", 0)
+                chrome_h = data.get("chrome_height", 0)  # browser toolbar height
                 elements = {}
                 for el in data["elements"]:
+                    # Convert viewport coords to screen coords
                     elements[el["id"]] = ElementState(
-                        el["id"], el["x"], el["y"], el["w"], el["h"])
+                        el["id"],
+                        el["x"] + win_x,
+                        el["y"] + win_y + chrome_h,
+                        el["w"], el["h"])
                 shared_state["elements"] = elements
                 shared_state["engine"] = AttentionEngine(n_elements=len(elements))
                 shared_state["bandit"] = LinUCBBandit(n_actions=len(elements))
@@ -1044,9 +1075,14 @@ async def main():
 
     gaze = GazeEstimator(model_name="tiny_mlp")
     print("\n=== GAZE CALIBRATION ===")
-    print("  Calibration points are mapped to the Netflix card layout.")
-    print("  Keep window focused. Move head slightly between dots.")
-    run_netflix_calibration(gaze, cam_idx, sw, sh)
+    print("  Keep the calibration window focused. Move head slightly between dots.")
+    print("  IMPORTANT: After calibration, position your browser at the TOP-LEFT of the screen.")
+    # Use standard dense grid — it gives the best general coverage.
+    # The Netflix-specific calibration assumed the browser was fullscreen
+    # at (0,0) which is often wrong. The coordinate transform in the
+    # WebSocket handler now accounts for browser position.
+    run_dense_grid_calibration(gaze, rows=5, cols=5, order="serpentine",
+                                pulse_d=0.9, cd_d=1.0, camera_index=cam_idx)
     print("  Done.\n")
 
     # Start HTTP server
