@@ -101,11 +101,41 @@
   .flash { position:fixed; inset:0; background:rgba(0,255,136,0.06); z-index:999;
            opacity:0; pointer-events:none; transition:opacity 0.3s; }
   .flash.active { opacity:1; }
+
+  /* Gaze dot — shown in diagnostic mode */
+  .gaze-dot { position:fixed; width:14px; height:14px; border-radius:50%;
+              background:rgba(255,50,50,0.5); border:2px solid rgba(255,100,100,0.6);
+              transform:translate(-50%,-50%); pointer-events:none; z-index:1001;
+              display:none; transition:left 0.05s,top 0.05s; }
+  .gaze-dot.visible { display:block; }
+
+  /* Diagnostic panel */
+  .diag-panel { position:fixed; top:60px; right:10px; width:220px; padding:10px;
+                background:rgba(20,20,40,0.95); border:1px solid #2a2a40; border-radius:8px;
+                font-size:10px; color:#6a6a8a; z-index:1002; display:none; }
+  .diag-panel.visible { display:block; }
+  .diag-panel h4 { color:#00d4ff; font-size:11px; margin-bottom:6px; letter-spacing:1px; }
+  .diag-row { display:flex; justify-content:space-between; margin:2px 0; }
+  .diag-val { color:#e0e0f0; }
 </style>
 </head>
 <body>
 
 <div class="flash" id="flash"></div>
+<div class="gaze-dot" id="gazeDot"></div>
+<div class="diag-panel" id="diagPanel">
+  <h4>GAZE DIAGNOSTIC</h4>
+  <div class="diag-row"><span>Cursor</span><span class="diag-val" id="diagCursor">--</span></div>
+  <div class="diag-row"><span>Gaze</span><span class="diag-val" id="diagGaze">--</span></div>
+  <div class="diag-row"><span>Error</span><span class="diag-val" id="diagError">--</span></div>
+  <div class="diag-row"><span>Training pts</span><span class="diag-val" id="diagPoints">--</span></div>
+  <div class="diag-row"><span>Round</span><span class="diag-val" id="diagRound">--</span></div>
+  <div style="margin-top:8px;font-size:9px;color:#4a4a6a">
+    Press D to toggle diagnostic<br>
+    Click anywhere to add training point<br>
+    Press 1/2/3 to start training round
+  </div>
+</div>
 
 <!-- ═══ CALIBRATION ═══ -->
 <div id="calScreen">
@@ -355,6 +385,18 @@ function connect() {
     if (d.type === 'cal_error') { alert(d.msg); return; }
     if (d.type !== 'state') return;
 
+    // Gaze dot (diagnostic mode)
+    lastGazeX = d.gaze_x; lastGazeY = d.gaze_y;
+    if (diagMode) {
+      // Convert screen coords back to viewport for display
+      const ch = window.outerHeight - window.innerHeight;
+      const dotX = d.gaze_x - window.screenX;
+      const dotY = d.gaze_y - window.screenY - ch;
+      document.getElementById('gazeDot').style.left = dotX + 'px';
+      document.getElementById('gazeDot').style.top = dotY + 'px';
+      document.getElementById('diagGaze').textContent = `${d.gaze_x}, ${d.gaze_y}`;
+    }
+
     // Header
     const eng = d.engagement;
     if (eng != null) {
@@ -421,6 +463,64 @@ function connect() {
     }
   };
 }
+
+// ── Diagnostic mode ──
+let diagMode = false;
+let trainRound = 0;
+let trainPoints = 0;
+let cursorX = 0, cursorY = 0;
+let lastGazeX = 0, lastGazeY = 0;
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'd' || e.key === 'D') {
+    diagMode = !diagMode;
+    document.getElementById('gazeDot').classList.toggle('visible', diagMode);
+    document.getElementById('diagPanel').classList.toggle('visible', diagMode);
+  }
+  if (e.key === '1' || e.key === '2' || e.key === '3') {
+    trainRound = parseInt(e.key);
+    trainPoints = 0;
+    document.getElementById('diagRound').textContent = `Round ${trainRound} — click cards!`;
+    diagMode = true;
+    document.getElementById('gazeDot').classList.add('visible');
+    document.getElementById('diagPanel').classList.add('visible');
+  }
+});
+
+document.addEventListener('mousemove', (e) => {
+  cursorX = e.clientX;
+  cursorY = e.clientY;
+  if (diagMode) {
+    const screenX = e.screenX;
+    const screenY = e.screenY;
+    document.getElementById('diagCursor').textContent = `${Math.round(screenX)}, ${Math.round(screenY)}`;
+    const dx = screenX - lastGazeX;
+    const dy = screenY - lastGazeY;
+    const err = Math.round(Math.sqrt(dx*dx + dy*dy));
+    document.getElementById('diagError').textContent = `${err}px`;
+  }
+});
+
+// Click anywhere = training point (cursor is ground truth)
+document.addEventListener('click', (e) => {
+  if (!diagMode || !ws || ws.readyState !== WebSocket.OPEN) return;
+  // Don't train on calibration dots or buttons
+  if (e.target.closest('.cal-dot') || e.target.closest('#calDone')) return;
+
+  const screenX = e.screenX;
+  const screenY = e.screenY;
+  ws.send(JSON.stringify({ type: 'cursor_train', screen_x: screenX, screen_y: screenY }));
+  trainPoints++;
+  document.getElementById('diagPoints').textContent = trainPoints + ' (this round)';
+
+  // Visual feedback — small green dot where clicked
+  const dot = document.createElement('div');
+  dot.style.cssText = `position:fixed;width:8px;height:8px;border-radius:50%;background:#00ff88;
+    pointer-events:none;z-index:9999;left:${e.clientX-4}px;top:${e.clientY-4}px;transition:opacity 0.5s;`;
+  document.body.appendChild(dot);
+  setTimeout(() => { dot.style.opacity = '0'; }, 300);
+  setTimeout(() => dot.remove(), 800);
+});
 
 buildCalDots();
 connect();

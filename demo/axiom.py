@@ -344,7 +344,22 @@ async def ws_handler(websocket):
         async for msg in websocket:
             data = json.loads(msg)
 
-            if data["type"] == "cal_point":
+            if data["type"] == "cursor_train":
+                # Continuous training: cursor position = ground truth for where eyes are
+                screen_x = data["screen_x"]
+                screen_y = data["screen_y"]
+                features = state.get("_latest_features")
+                if features is not None and state["calibrated"]:
+                    state["cal_features"].append(features.copy())
+                    state["cal_targets"].append([screen_x, screen_y])
+                    # Retrain every 20 new points
+                    if len(state["cal_features"]) % 20 == 0:
+                        X = np.array(state["cal_features"])
+                        y = np.array(state["cal_targets"])
+                        state["_gaze_estimator"].train(X, y)
+                        print(f"[CAL] Retrained on {len(state['cal_features'])} total points", flush=True)
+
+            elif data["type"] == "cal_point":
                 # Browser user clicked a calibration dot at these SCREEN coordinates
                 screen_x = data["screen_x"]
                 screen_y = data["screen_y"]
