@@ -292,6 +292,12 @@
 <!-- Card Grid -->
 <div class="grid" id="grid"></div>
 
+<!-- System Narration -->
+<div class="now-playing" style="bottom:60px;background:rgba(20,20,32,0.95);border-top:1px solid #1a1a3e;">
+  <div id="narration" style="font-size:12px;color:#6a6a8a;flex:1;font-style:italic;">Initializing AXIOM...</div>
+  <div id="sessionInfo" style="font-size:10px;color:#3a3a5a;"></div>
+</div>
+
 <!-- Now Playing -->
 <div class="now-playing">
   <div class="np-title" id="npTitle"><span class="np-empty">Nothing playing — select a title with your gaze</span></div>
@@ -429,6 +435,31 @@ function connect() {
         pct.textContent = '';
       }
     });
+
+    // Narration — explain what the system is detecting
+    const narr = document.getElementById('narration');
+    const topEl = Object.entries(d.elements || {}).sort((a,b) => b[1].confidence - a[1].confidence)[0];
+    if (d.selected) {
+      narr.textContent = `Selected! Brain persona: ${d.brain_persona}. RL reward avg: ${d.bandit_avg_reward}. Threshold: ${d.threshold}.`;
+      narr.style.color = '#00ff88';
+    } else if (topEl && topEl[1].confidence > 0.4) {
+      const card = document.getElementById(topEl[0]);
+      const title = card ? card.dataset.title : topEl[0];
+      narr.textContent = `Looking at "${title}" (${(topEl[1].confidence*100).toFixed(0)}% confidence). Brain: ${d.brain_persona}. Focus to select.`;
+      narr.style.color = '#8888aa';
+    } else if (d.brain_persona === 'confused') {
+      narr.textContent = `Detecting cognitive load. Slowing down selection sensitivity.`;
+      narr.style.color = '#ff8844';
+    } else if (d.brain_persona === 'focused') {
+      narr.textContent = `High focus detected. Ready for selection.`;
+      narr.style.color = '#00aaff';
+    } else {
+      narr.textContent = `Browsing mode. Look at a title and focus to select it.`;
+      narr.style.color = '#6a6a8a';
+    }
+
+    document.getElementById('sessionInfo').textContent =
+      `Session: ${d.session_id || '--'} | Redis: ${d.has_redis ? 'ON' : 'OFF'} | Actions: ${d.action_count}`;
 
     // Selection
     if (d.selected) {
