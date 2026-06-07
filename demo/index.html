@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>AXIOM · Mind-Controlled Netflix</title>
+<title>AXIOM · Mind-Controlled Streaming</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
 
@@ -30,239 +30,168 @@
 
   /* ── Header ── */
   .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 40px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 40px;
     background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%);
-    position: relative;
-    z-index: 10;
+    position: relative; z-index: 20;
   }
-  .logo {
-    font-size: 26px;
-    font-weight: 800;
-    color: var(--accent);
-    letter-spacing: 2px;
-  }
+  .logo { font-size: 26px; font-weight: 800; color: var(--accent); letter-spacing: 2px; }
   .logo span { color: var(--text); font-weight: 400; font-size: 14px; letter-spacing: 0; margin-left: 12px; }
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    font-size: 12px;
-    color: var(--dim);
-  }
-  .eeg-bar {
-    width: 120px;
-    height: 6px;
-    background: var(--border);
-    border-radius: 3px;
-    overflow: hidden;
-  }
-  .eeg-fill {
-    height: 100%;
-    background: #00ff88;
-    border-radius: 3px;
-    transition: width 0.2s ease;
-  }
-  .status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #00ff88;
-    box-shadow: 0 0 6px #00ff8880;
+  .header-right { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--dim); }
+  .eeg-bar { width: 100px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .eeg-fill { height: 100%; background: #00ff88; border-radius: 3px; transition: width 0.2s; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4444; }
+  .status-dot.on { background: #00ff88; box-shadow: 0 0 6px #00ff8880; }
+  .persona-badge {
+    font-size: 9px; padding: 3px 8px; border-radius: 3px;
+    background: #1a1a2e; letter-spacing: 1px; text-transform: uppercase;
+    border: 1px solid #2a2a40; transition: all 0.3s;
   }
 
-  /* ── Hero ── */
-  .hero {
-    padding: 20px 40px 30px;
-  }
-  .hero h2 {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--dim);
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    margin-bottom: 8px;
-  }
-  .hero p {
-    font-size: 13px;
-    color: #4a4a6a;
-  }
+  /* ── Browse Screen ── */
+  #browseScreen { display: flex; flex-direction: column; height: calc(100vh - 52px); }
+  #browseScreen.hidden { display: none; }
 
-  /* ── Card Grid ── */
+  .hero-section {
+    padding: 20px 40px 16px;
+  }
+  .hero-section h2 { font-size: 15px; font-weight: 600; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; }
+  .hero-section p { font-size: 12px; color: #3a3a5a; margin-top: 4px; }
+
   .grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 24px;
-    padding: 0 40px;
-    max-width: 1400px;
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 20px; padding: 0 40px; flex: 1;
   }
 
   .card {
-    position: relative;
-    border-radius: 12px;
-    overflow: hidden;
-    aspect-ratio: 16/10;
-    background: var(--card);
+    position: relative; border-radius: 12px; overflow: hidden;
+    aspect-ratio: 16/10; background: var(--card);
     border: 2px solid transparent;
-    transition: transform 0.2s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    transition: transform 0.25s ease, border-color 0.3s, box-shadow 0.3s;
     cursor: none;
   }
-
-  .card-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
+  .card-bg {
+    width: 100%; height: 100%;
+    background-size: cover; background-position: center;
   }
-
   .card-gradient {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 60%;
-    background: linear-gradient(transparent, rgba(0,0,0,0.85));
+    position: absolute; bottom: 0; left: 0; right: 0; height: 65%;
+    background: linear-gradient(transparent, rgba(0,0,0,0.9));
   }
+  .card-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 16px; }
+  .card-title { font-size: 15px; font-weight: 700; margin-bottom: 3px; }
+  .card-meta { font-size: 10px; color: var(--dim); }
+  .card-desc { font-size: 10px; color: #4a4a6a; margin-top: 4px; display: none; }
 
-  .card-info {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 16px;
-  }
-  .card-title {
-    font-size: 16px;
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-  .card-meta {
-    font-size: 11px;
-    color: var(--dim);
-  }
+  .card.gaze-hover { border-color: rgba(255,255,255,0.2); transform: scale(1.03); }
+  .card.gaze-hover .card-desc { display: block; }
+  .card.gaze-focus { border-color: rgba(255,255,255,0.45); transform: scale(1.05); box-shadow: 0 0 25px rgba(255,255,255,0.08); }
+  .card.gaze-focus .card-desc { display: block; }
+  .card.gaze-locked { border-color: var(--accent); transform: scale(1.06); box-shadow: 0 0 40px var(--glow); }
+  .card.gaze-locked .card-desc { display: block; }
+  .card.gaze-selected { border-color: #00ff88; transform: scale(1.08); box-shadow: 0 0 50px rgba(0,255,136,0.25); }
 
-  /* ── Gaze states ── */
-  .card.gaze-hover {
-    border-color: rgba(255, 255, 255, 0.25);
-    transform: scale(1.03);
-  }
-
-  .card.gaze-focus {
-    border-color: rgba(255, 255, 255, 0.5);
-    transform: scale(1.05);
-    box-shadow: 0 0 30px rgba(255, 255, 255, 0.1);
-  }
-
-  .card.gaze-locked {
-    border-color: var(--accent);
-    transform: scale(1.06);
-    box-shadow: 0 0 40px var(--glow), 0 0 80px rgba(229, 9, 20, 0.15);
-  }
-
-  .card.gaze-selected {
-    border-color: #00ff88;
-    transform: scale(1.08);
-    box-shadow: 0 0 60px rgba(0, 255, 136, 0.3);
-  }
-
-  /* ── Confidence ring ── */
   .ring-container {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    opacity: 0;
-    transition: opacity 0.2s;
-    pointer-events: none;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    opacity: 0; transition: opacity 0.2s; pointer-events: none;
   }
   .card.gaze-focus .ring-container,
-  .card.gaze-locked .ring-container {
-    opacity: 1;
-  }
-  .ring-bg {
-    fill: none;
-    stroke: rgba(255,255,255,0.15);
-    stroke-width: 3;
-  }
+  .card.gaze-locked .ring-container { opacity: 1; }
+  .ring-bg { fill: none; stroke: rgba(255,255,255,0.12); stroke-width: 3; }
   .ring-fg {
-    fill: none;
-    stroke: white;
-    stroke-width: 4;
-    stroke-linecap: round;
-    transform: rotate(-90deg);
-    transform-origin: center;
-    transition: stroke-dashoffset 0.1s ease, stroke 0.2s;
+    fill: none; stroke: white; stroke-width: 4; stroke-linecap: round;
+    transform: rotate(-90deg); transform-origin: center; transition: stroke-dashoffset 0.1s, stroke 0.2s;
   }
-  .card.gaze-locked .ring-fg {
-    stroke: var(--accent);
-    filter: drop-shadow(0 0 6px var(--glow));
+  .card.gaze-locked .ring-fg { stroke: var(--accent); filter: drop-shadow(0 0 6px var(--glow)); }
+  .ring-pct { fill: white; font-size: 14px; font-weight: 700; font-family: 'Inter'; text-anchor: middle; dominant-baseline: central; }
+
+  /* ── Player Screen ── */
+  #playerScreen { display: none; height: calc(100vh - 52px); flex-direction: column; background: #000; }
+  #playerScreen.active { display: flex; }
+
+  .player-video {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
   }
-  .ring-pct {
-    fill: white;
-    font-size: 14px;
-    font-weight: 700;
-    font-family: 'Inter', sans-serif;
-    text-anchor: middle;
-    dominant-baseline: central;
+  .player-video video {
+    width: 100%; height: 100%; object-fit: cover;
+  }
+  .player-video iframe {
+    width: 100%; height: 100%; border: none;
+  }
+
+  .player-overlay {
+    position: absolute; inset: 0;
+    background: linear-gradient(transparent 60%, rgba(0,0,0,0.7));
+    display: flex; flex-direction: column; justify-content: flex-end;
+    padding: 40px; transition: opacity 0.3s;
+  }
+  .player-title { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+  .player-meta { font-size: 13px; color: var(--dim); margin-bottom: 16px; }
+  .player-desc { font-size: 13px; color: #8888aa; max-width: 600px; line-height: 1.6; }
+
+  .player-controls {
+    padding: 16px 40px;
+    background: var(--surface);
+    display: flex; align-items: center; gap: 20px;
+    border-top: 1px solid var(--border);
+  }
+  .ctrl-btn {
+    padding: 10px 24px; border-radius: 8px; border: none;
+    font-family: 'Inter'; font-size: 13px; font-weight: 600;
+    cursor: none; transition: all 0.2s; letter-spacing: 0.5px;
+    position: relative;
+  }
+  .ctrl-btn.primary { background: var(--accent); color: white; }
+  .ctrl-btn.secondary { background: var(--border); color: var(--text); }
+  .ctrl-btn.gaze-hover { transform: scale(1.05); box-shadow: 0 0 15px rgba(255,255,255,0.1); }
+  .ctrl-btn.gaze-focus { transform: scale(1.08); box-shadow: 0 0 20px rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); }
+  .ctrl-btn.gaze-locked { transform: scale(1.1); box-shadow: 0 0 25px var(--glow); }
+
+  .ctrl-ring {
+    position: absolute; top: -8px; right: -8px; width: 24px; height: 24px;
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .ctrl-btn.gaze-focus .ctrl-ring,
+  .ctrl-btn.gaze-locked .ctrl-ring { opacity: 1; }
+
+  .player-brain {
+    margin-left: auto; display: flex; align-items: center; gap: 12px;
+    font-size: 11px; color: var(--dim);
   }
 
   /* ── Gaze dot ── */
   .gaze-dot {
-    position: fixed;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: rgba(0, 180, 255, 0.6);
-    border: 2px solid rgba(255,255,255,0.5);
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    z-index: 1000;
+    position: fixed; width: 10px; height: 10px; border-radius: 50%;
+    background: rgba(0, 180, 255, 0.5); border: 2px solid rgba(255,255,255,0.4);
+    transform: translate(-50%, -50%); pointer-events: none; z-index: 1000;
     transition: left 0.05s ease, top 0.05s ease;
   }
 
-  /* ── Selection flash overlay ── */
-  .flash {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 255, 136, 0.08);
-    z-index: 999;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s;
-  }
+  .flash { position: fixed; inset: 0; background: rgba(0,255,136,0.06); z-index: 999; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
   .flash.active { opacity: 1; }
 
-  /* ── Now Playing bar ── */
-  .now-playing {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 60px;
-    background: var(--surface);
+  /* ── Narration + Now Playing ── */
+  .bottom-bar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+    display: flex; flex-direction: column;
+  }
+  .narration-bar {
+    padding: 8px 40px; background: rgba(20,20,32,0.95);
+    border-top: 1px solid #1a1a3e;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  #narration { font-size: 11px; color: #6a6a8a; font-style: italic; flex: 1; }
+  #sessionInfo { font-size: 9px; color: #3a3a5a; }
+
+  .now-playing-bar {
+    padding: 10px 40px; background: var(--surface);
     border-top: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 40px;
-    gap: 16px;
-    z-index: 10;
+    display: flex; align-items: center; gap: 16px;
   }
-  .np-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-    flex: 1;
-  }
-  .np-status {
-    font-size: 12px;
-    color: var(--dim);
-  }
-  .np-empty {
-    font-size: 13px;
-    color: #3a3a5a;
-    font-style: italic;
-  }
+  .np-title { font-size: 13px; font-weight: 600; flex: 1; }
+  .np-status { font-size: 11px; color: var(--dim); }
+  .np-empty { color: #3a3a5a; font-style: italic; }
 </style>
 </head>
 <body>
@@ -274,49 +203,90 @@
 <div class="header">
   <div class="logo">AXIOM<span>mind-controlled streaming</span></div>
   <div class="header-right">
-    <span id="personaLabel" style="font-size:10px;padding:3px 8px;border-radius:3px;background:#1a1a2e;color:#6a6a8a;letter-spacing:1px;text-transform:uppercase;">--</span>
-    <span id="engLabel">Engagement: --</span>
-    <div class="eeg-bar"><div class="eeg-fill" id="eegFill" style="width: 50%"></div></div>
-    <span id="rlLabel" style="font-size:10px;color:#6a6a8a;">RL: --</span>
-    <span id="threshLabel" style="font-size:10px;color:#6a6a8a;">θ: --</span>
+    <span class="persona-badge" id="personaLabel">--</span>
+    <span id="engLabel">--</span>
+    <div class="eeg-bar"><div class="eeg-fill" id="eegFill" style="width:50%"></div></div>
+    <span id="rlLabel" style="font-size:10px">RL: --</span>
+    <span id="threshLabel" style="font-size:10px">θ: --</span>
     <div class="status-dot" id="statusDot"></div>
   </div>
 </div>
 
-<!-- Hero -->
-<div class="hero">
-  <h2>Trending Now</h2>
-  <p>Look at a title. Focus to select it.</p>
+<!-- ═══ BROWSE SCREEN ═══ -->
+<div id="browseScreen">
+  <div class="hero-section">
+    <h2>Trending Now</h2>
+    <p>Look at a title. Focus to select it. Your brain controls the interface.</p>
+  </div>
+  <div class="grid" id="grid"></div>
 </div>
 
-<!-- Card Grid -->
-<div class="grid" id="grid"></div>
-
-<!-- System Narration -->
-<div class="now-playing" style="bottom:60px;background:rgba(20,20,32,0.95);border-top:1px solid #1a1a3e;">
-  <div id="narration" style="font-size:12px;color:#6a6a8a;flex:1;font-style:italic;">Initializing AXIOM...</div>
-  <div id="sessionInfo" style="font-size:10px;color:#3a3a5a;"></div>
+<!-- ═══ PLAYER SCREEN ═══ -->
+<div id="playerScreen">
+  <div class="player-video" id="playerVideo">
+    <!-- Video or poster will be inserted here -->
+  </div>
+  <div class="player-controls" id="playerControls">
+    <div class="ctrl-btn primary" id="btnPlayPause" data-action="playpause">
+      ▶ Play
+      <svg class="ctrl-ring" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="white" stroke-width="2" stroke-dasharray="62.8" stroke-dashoffset="62.8" transform="rotate(-90 12 12)"/></svg>
+    </div>
+    <div class="ctrl-btn secondary" id="btnBack" data-action="back">
+      ← Back to Browse
+      <svg class="ctrl-ring" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="white" stroke-width="2" stroke-dasharray="62.8" stroke-dashoffset="62.8" transform="rotate(-90 12 12)"/></svg>
+    </div>
+    <div class="player-brain">
+      <span id="playerEngagement">--</span>
+      <span id="playerPersona">--</span>
+    </div>
+  </div>
 </div>
 
-<!-- Now Playing -->
-<div class="now-playing">
-  <div class="np-title" id="npTitle"><span class="np-empty">Nothing playing — select a title with your gaze</span></div>
-  <div class="np-status" id="npStatus"></div>
+<!-- Bottom bars -->
+<div class="bottom-bar">
+  <div class="narration-bar">
+    <div id="narration">Initializing AXIOM...</div>
+    <div id="sessionInfo"></div>
+  </div>
+  <div class="now-playing-bar">
+    <div class="np-title" id="npTitle"><span class="np-empty">Nothing playing — select a title with your gaze</span></div>
+    <div class="np-status" id="npStatus"></div>
+  </div>
 </div>
 
 <script>
 const MOVIES = [
-  { id: "m1", title: "Neural Drift", year: "2026", rating: "TV-MA", color: "#1a0a2e" },
-  { id: "m2", title: "The Last Signal", year: "2025", rating: "PG-13", color: "#0a1a2e" },
-  { id: "m3", title: "Cortex", year: "2026", rating: "R", color: "#2e1a0a" },
-  { id: "m4", title: "Mind Gate", year: "2024", rating: "TV-14", color: "#0a2e1a" },
-  { id: "m5", title: "Brainwave", year: "2026", rating: "PG-13", color: "#2e0a1a" },
-  { id: "m6", title: "Synaptic", year: "2025", rating: "TV-MA", color: "#1a2e0a" },
-  { id: "m7", title: "The Interface", year: "2026", rating: "R", color: "#0a0a2e" },
-  { id: "m8", title: "Echo Protocol", year: "2024", rating: "TV-14", color: "#2e2e0a" },
+  { id:"m1", title:"Neural Drift",     year:"2026", rating:"TV-MA", color:"#1a0a2e",
+    desc:"A neuroscientist discovers she can read minds through a consumer EEG device — but the signals are coming from somewhere else.",
+    video:"https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&controls=0" },
+  { id:"m2", title:"The Last Signal",  year:"2025", rating:"PG-13", color:"#0a1a2e",
+    desc:"When Earth's last radio telescope picks up a pattern in deep space noise, one intern realizes it matches human brainwaves.",
+    video:"https://www.youtube.com/embed/jNQXAC9IVRw?autoplay=1&mute=1&controls=0" },
+  { id:"m3", title:"Cortex",           year:"2026", rating:"R",     color:"#2e1a0a",
+    desc:"In a world where memories can be extracted and traded, a black-market dealer discovers a memory that could end civilization.",
+    video:"https://www.youtube.com/embed/LXb3EKWsInQ?autoplay=1&mute=1&controls=0" },
+  { id:"m4", title:"Mind Gate",        year:"2024", rating:"TV-14", color:"#0a2e1a",
+    desc:"A brain-computer interface startup goes public — then their users start sharing dreams involuntarily.",
+    video:"https://www.youtube.com/embed/ScMzIvxBSi4?autoplay=1&mute=1&controls=0" },
+  { id:"m5", title:"Brainwave",        year:"2026", rating:"PG-13", color:"#2e0a1a",
+    desc:"An athlete banned from competition learns to control machines with her mind, entering the underground BCI racing circuit.",
+    video:"https://www.youtube.com/embed/1La4QzGeaaQ?autoplay=1&mute=1&controls=0" },
+  { id:"m6", title:"Synaptic",         year:"2025", rating:"TV-MA", color:"#1a2e0a",
+    desc:"Two strangers realize their neural implants have been secretly connected. Every thought is shared. Every secret exposed.",
+    video:"https://www.youtube.com/embed/hHW1oY26kxQ?autoplay=1&mute=1&controls=0" },
+  { id:"m7", title:"The Interface",    year:"2026", rating:"R",     color:"#0a0a2e",
+    desc:"A rogue AI teaches itself to speak directly to human neurons. The question isn't whether it works — it's whether you can tell the difference.",
+    video:"https://www.youtube.com/embed/ZRCdORJiUgU?autoplay=1&mute=1&controls=0" },
+  { id:"m8", title:"Echo Protocol",    year:"2024", rating:"TV-14", color:"#2e2e0a",
+    desc:"When a classified military BCI program is leaked, every soldier with an implant becomes a potential weapon — or a potential victim.",
+    video:"https://www.youtube.com/embed/d1YBv2mWll0?autoplay=1&mute=1&controls=0" },
 ];
 
 const CIRC = 2 * Math.PI * 28;
+const CTRL_CIRC = 2 * Math.PI * 10;
+let currentScreen = 'browse';
+let currentMovie = null;
+let isPlaying = false;
 
 // Build cards
 const grid = document.getElementById('grid');
@@ -326,18 +296,17 @@ MOVIES.forEach(m => {
   card.id = m.id;
   card.dataset.title = m.title;
   card.innerHTML = `
-    <div style="width:100%;height:100%;background:linear-gradient(135deg, ${m.color}, ${m.color}dd, #0a0a15);"></div>
+    <div class="card-bg" style="background:linear-gradient(135deg, ${m.color}, ${m.color}dd, #0a0a15);"></div>
     <div class="card-gradient"></div>
     <div class="card-info">
       <div class="card-title">${m.title}</div>
       <div class="card-meta">${m.year} · ${m.rating}</div>
+      <div class="card-desc">${m.desc.slice(0, 80)}...</div>
     </div>
     <div class="ring-container">
       <svg width="70" height="70" viewBox="0 0 70 70">
         <circle class="ring-bg" cx="35" cy="35" r="28"/>
-        <circle class="ring-fg" cx="35" cy="35" r="28"
-          stroke-dasharray="${CIRC}"
-          stroke-dashoffset="${CIRC}"/>
+        <circle class="ring-fg" cx="35" cy="35" r="28" stroke-dasharray="${CIRC}" stroke-dashoffset="${CIRC}"/>
         <text class="ring-pct" x="35" y="35">0%</text>
       </svg>
     </div>
@@ -345,26 +314,90 @@ MOVIES.forEach(m => {
   grid.appendChild(card);
 });
 
-// Register element positions with the Python server
+function showPlayer(movie) {
+  currentMovie = movie;
+  currentScreen = 'player';
+  isPlaying = false;
+
+  document.getElementById('browseScreen').classList.add('hidden');
+  document.getElementById('playerScreen').classList.add('active');
+
+  const pv = document.getElementById('playerVideo');
+  pv.innerHTML = `
+    <div class="player-overlay" id="playerOverlay">
+      <div class="player-title">${movie.title}</div>
+      <div class="player-meta">${movie.year} · ${movie.rating} · 2h 14m</div>
+      <div class="player-desc">${movie.desc}</div>
+    </div>
+  `;
+  pv.style.background = `linear-gradient(135deg, ${movie.color}, #0a0a15)`;
+
+  document.getElementById('btnPlayPause').textContent = '▶ Play';
+  document.getElementById('npTitle').textContent = `Selected: ${movie.title}`;
+  document.getElementById('npStatus').textContent = 'Look at Play to start';
+
+  // Re-register elements (player controls)
+  setTimeout(registerElements, 300);
+}
+
+function togglePlay() {
+  const pv = document.getElementById('playerVideo');
+  const overlay = document.getElementById('playerOverlay');
+
+  if (!isPlaying) {
+    isPlaying = true;
+    pv.innerHTML = `<iframe src="${currentMovie.video}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+    document.getElementById('btnPlayPause').textContent = '⏸ Pause';
+    document.getElementById('npTitle').textContent = `▶ Playing: ${currentMovie.title}`;
+    document.getElementById('npStatus').textContent = 'Focus on Pause to stop. Relax to auto-pause.';
+  } else {
+    isPlaying = false;
+    pv.innerHTML = `
+      <div class="player-overlay" id="playerOverlay">
+        <div class="player-title">${currentMovie.title}</div>
+        <div class="player-meta">${currentMovie.year} · ${currentMovie.rating} · 2h 14m</div>
+        <div class="player-desc">${currentMovie.desc}</div>
+      </div>
+    `;
+    pv.style.background = `linear-gradient(135deg, ${currentMovie.color}, #0a0a15)`;
+    document.getElementById('btnPlayPause').textContent = '▶ Play';
+    document.getElementById('npTitle').textContent = `Paused: ${currentMovie.title}`;
+    document.getElementById('npStatus').textContent = 'Focus on Play to resume';
+  }
+}
+
+function backToBrowse() {
+  currentScreen = 'browse';
+  currentMovie = null;
+  isPlaying = false;
+  document.getElementById('playerScreen').classList.remove('active');
+  document.getElementById('browseScreen').classList.remove('hidden');
+  document.getElementById('playerVideo').innerHTML = '';
+  document.getElementById('npTitle').innerHTML = '<span class="np-empty">Nothing playing — select a title</span>';
+  document.getElementById('npStatus').textContent = '';
+  setTimeout(registerElements, 300);
+}
+
+// Register elements with Python server
 function registerElements() {
   const elements = [];
-  document.querySelectorAll('.card').forEach(card => {
-    const r = card.getBoundingClientRect();
-    elements.push({
-      id: card.id,
-      label: card.dataset.title || card.id,
-      x: Math.round(r.left),
-      y: Math.round(r.top),
-      w: Math.round(r.width),
-      h: Math.round(r.height),
+  if (currentScreen === 'browse') {
+    document.querySelectorAll('.card').forEach(card => {
+      const r = card.getBoundingClientRect();
+      elements.push({ id: card.id, label: card.dataset.title || card.id,
+                       x: Math.round(r.left), y: Math.round(r.top),
+                       w: Math.round(r.width), h: Math.round(r.height) });
     });
-  });
+  } else {
+    document.querySelectorAll('.ctrl-btn').forEach(btn => {
+      const r = btn.getBoundingClientRect();
+      elements.push({ id: btn.id, label: btn.dataset.action,
+                       x: Math.round(r.left), y: Math.round(r.top),
+                       w: Math.round(r.width), h: Math.round(r.height) });
+    });
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'register_elements',
-      elements,
-      page_title: document.title,
-    }));
+    ws.send(JSON.stringify({ type: 'register_elements', elements, page_title: document.title }));
   }
 }
 
@@ -373,13 +406,12 @@ let ws;
 function connect() {
   ws = new WebSocket('ws://127.0.0.1:8091');
   ws.onopen = () => {
-    document.getElementById('statusDot').style.background = '#00ff88';
+    document.getElementById('statusDot').classList.add('on');
     setTimeout(registerElements, 500);
-    // Re-register on resize
     window.addEventListener('resize', () => setTimeout(registerElements, 300));
   };
   ws.onclose = () => {
-    document.getElementById('statusDot').style.background = '#ff4444';
+    document.getElementById('statusDot').classList.remove('on');
     setTimeout(connect, 2000);
   };
   ws.onmessage = (e) => {
@@ -387,98 +419,116 @@ function connect() {
     if (d.type !== 'state') return;
 
     // Gaze dot
-    const dot = document.getElementById('gazeDot');
-    dot.style.left = d.gaze_x + 'px';
-    dot.style.top = d.gaze_y + 'px';
+    document.getElementById('gazeDot').style.left = d.gaze_x + 'px';
+    document.getElementById('gazeDot').style.top = d.gaze_y + 'px';
 
-    // Engagement + brain persona + RL stats
+    // Header stats
     const eng = d.engagement;
-    document.getElementById('engLabel').textContent = `Engagement: ${(eng * 100).toFixed(0)}%`;
+    document.getElementById('engLabel').textContent = `${(eng*100).toFixed(0)}%`;
     document.getElementById('eegFill').style.width = (eng * 100) + '%';
     document.getElementById('eegFill').style.background = eng > 0.6 ? '#00ff88' : '#00aaff';
-
     const personaColors = {focused:'#00ff88', browsing:'#00aaff', deciding:'#ffaa00', confused:'#ff4444'};
     const pl = document.getElementById('personaLabel');
     pl.textContent = d.brain_persona || '--';
     pl.style.color = personaColors[d.brain_persona] || '#6a6a8a';
     pl.style.borderColor = personaColors[d.brain_persona] || '#2a2a40';
-    pl.style.border = '1px solid';
+    document.getElementById('rlLabel').textContent = `RL:${(d.bandit_avg_reward||0).toFixed(2)}`;
+    document.getElementById('threshLabel').textContent = `θ:${(d.threshold||0.75).toFixed(2)}`;
 
-    document.getElementById('rlLabel').textContent = `RL: ${(d.bandit_avg_reward || 0).toFixed(2)}`;
-    document.getElementById('threshLabel').textContent = `θ: ${(d.threshold || 0.75).toFixed(2)}`;
-
-    // Element states
-    document.querySelectorAll('.card').forEach(card => {
-      const elState = d.elements[card.id];
-      card.classList.remove('gaze-hover', 'gaze-focus', 'gaze-locked', 'gaze-selected');
-
-      if (!elState) return;
-      const c = elState.confidence;
-
-      if (c >= 0.65) {
-        card.classList.add('gaze-locked');
-      } else if (c >= 0.35) {
-        card.classList.add('gaze-focus');
-      } else if (c >= 0.15) {
-        card.classList.add('gaze-hover');
-      }
-
-      // Update ring
-      const ring = card.querySelector('.ring-fg');
-      const pct = card.querySelector('.ring-pct');
-      if (ring && c >= 0.15) {
-        const progress = Math.min(1, c / 0.75);
-        ring.setAttribute('stroke-dashoffset', CIRC * (1 - progress));
-        pct.textContent = Math.round(c * 100) + '%';
-      } else if (ring) {
-        ring.setAttribute('stroke-dashoffset', CIRC);
-        pct.textContent = '';
-      }
-    });
-
-    // Narration — explain what the system is detecting
-    const narr = document.getElementById('narration');
-    const topEl = Object.entries(d.elements || {}).sort((a,b) => b[1].confidence - a[1].confidence)[0];
-    if (d.selected) {
-      narr.textContent = `Selected! Brain persona: ${d.brain_persona}. RL reward avg: ${d.bandit_avg_reward}. Threshold: ${d.threshold}.`;
-      narr.style.color = '#00ff88';
-    } else if (topEl && topEl[1].confidence > 0.4) {
-      const card = document.getElementById(topEl[0]);
-      const title = card ? card.dataset.title : topEl[0];
-      narr.textContent = `Looking at "${title}" (${(topEl[1].confidence*100).toFixed(0)}% confidence). Brain: ${d.brain_persona}. Focus to select.`;
-      narr.style.color = '#8888aa';
-    } else if (d.brain_persona === 'confused') {
-      narr.textContent = `Detecting cognitive load. Slowing down selection sensitivity.`;
-      narr.style.color = '#ff8844';
-    } else if (d.brain_persona === 'focused') {
-      narr.textContent = `High focus detected. Ready for selection.`;
-      narr.style.color = '#00aaff';
-    } else {
-      narr.textContent = `Browsing mode. Look at a title and focus to select it.`;
-      narr.style.color = '#6a6a8a';
+    // Player brain stats
+    if (currentScreen === 'player') {
+      document.getElementById('playerEngagement').textContent = `Focus: ${(eng*100).toFixed(0)}%`;
+      document.getElementById('playerPersona').textContent = d.brain_persona;
     }
 
-    document.getElementById('sessionInfo').textContent =
-      `Session: ${d.session_id || '--'} | Redis: ${d.has_redis ? 'ON' : 'OFF'} | Actions: ${d.action_count}`;
+    // Element highlighting
+    if (currentScreen === 'browse') {
+      document.querySelectorAll('.card').forEach(card => {
+        const el = d.elements[card.id];
+        card.classList.remove('gaze-hover', 'gaze-focus', 'gaze-locked', 'gaze-selected');
+        if (!el) return;
+        const c = el.confidence;
+        if (c >= 0.65) card.classList.add('gaze-locked');
+        else if (c >= 0.35) card.classList.add('gaze-focus');
+        else if (c >= 0.15) card.classList.add('gaze-hover');
 
-    // Selection
+        const ring = card.querySelector('.ring-fg');
+        const pct = card.querySelector('.ring-pct');
+        if (ring && c >= 0.15) {
+          ring.setAttribute('stroke-dashoffset', CIRC * (1 - Math.min(1, c / 0.75)));
+          pct.textContent = Math.round(c * 100) + '%';
+        } else if (ring) {
+          ring.setAttribute('stroke-dashoffset', CIRC);
+          pct.textContent = '';
+        }
+      });
+    } else {
+      document.querySelectorAll('.ctrl-btn').forEach(btn => {
+        const el = d.elements[btn.id];
+        btn.classList.remove('gaze-hover', 'gaze-focus', 'gaze-locked');
+        if (!el) return;
+        const c = el.confidence;
+        if (c >= 0.65) btn.classList.add('gaze-locked');
+        else if (c >= 0.35) btn.classList.add('gaze-focus');
+        else if (c >= 0.15) btn.classList.add('gaze-hover');
+
+        const ring = btn.querySelector('.ctrl-ring circle');
+        if (ring && c >= 0.15) {
+          ring.setAttribute('stroke-dashoffset', CTRL_CIRC * (1 - Math.min(1, c / 0.75)));
+        } else if (ring) {
+          ring.setAttribute('stroke-dashoffset', CTRL_CIRC);
+        }
+      });
+    }
+
+    // Narration
+    const narr = document.getElementById('narration');
+    const topEl = Object.entries(d.elements || {}).sort((a,b) => b[1].confidence - a[1].confidence)[0];
+
     if (d.selected) {
-      const card = document.getElementById(d.selected);
-      if (card) {
-        card.classList.add('gaze-selected');
-        const title = card.dataset.title;
-        document.getElementById('npTitle').textContent = '▶ Now Playing: ' + title;
-        document.getElementById('npStatus').textContent = 'Selected via gaze + focus';
+      narr.textContent = `Selected! Persona: ${d.brain_persona} | RL reward: ${d.bandit_avg_reward} | Threshold: ${d.threshold}`;
+      narr.style.color = '#00ff88';
+    } else if (topEl && topEl[1].confidence > 0.4) {
+      const label = topEl[0];
+      const el = document.getElementById(label);
+      const name = el ? (el.dataset.title || el.dataset.action || label) : label;
+      narr.textContent = `Focused on "${name}" (${(topEl[1].confidence*100).toFixed(0)}%). Brain: ${d.brain_persona}. Focus to select.`;
+      narr.style.color = '#8888aa';
+    } else if (d.brain_persona === 'confused') {
+      narr.textContent = 'High cognitive load detected. Slowing selection sensitivity.';
+      narr.style.color = '#ff8844';
+    } else if (d.brain_persona === 'focused') {
+      narr.textContent = 'High focus detected. Ready for selection.';
+      narr.style.color = '#00aaff';
+    } else {
+      narr.textContent = currentScreen === 'browse'
+        ? 'Browsing mode. Look at a title and focus to select.'
+        : 'Player active. Look at controls and focus to interact.';
+      narr.style.color = '#6a6a8a';
+    }
+    document.getElementById('sessionInfo').textContent =
+      `${d.session_id||'--'} | Redis:${d.has_redis?'ON':'OFF'} | Actions:${d.action_count}`;
 
-        // Flash
-        const flash = document.getElementById('flash');
-        flash.classList.add('active');
-        setTimeout(() => flash.classList.remove('active'), 400);
+    // Handle selection
+    if (d.selected) {
+      const flash = document.getElementById('flash');
+      flash.classList.add('active');
+      setTimeout(() => flash.classList.remove('active'), 400);
 
-        // Reset ring after a moment
-        setTimeout(() => {
-          card.classList.remove('gaze-selected');
-        }, 2000);
+      if (currentScreen === 'browse') {
+        const card = document.getElementById(d.selected);
+        if (card) {
+          card.classList.add('gaze-selected');
+          const movie = MOVIES.find(m => m.id === d.selected);
+          if (movie) {
+            setTimeout(() => showPlayer(movie), 800);
+          }
+          setTimeout(() => card.classList.remove('gaze-selected'), 2000);
+        }
+      } else {
+        // Player controls
+        if (d.selected === 'btnPlayPause') togglePlay();
+        else if (d.selected === 'btnBack') backToBrowse();
       }
     }
   };
