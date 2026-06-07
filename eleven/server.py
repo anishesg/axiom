@@ -15,7 +15,11 @@ import time
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
-load_dotenv()
+from pathlib import Path
+
+# Find .env file in project root (parent of eleven/)
+_env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(_env_path)
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, asdict
 from typing import Optional, Set
@@ -1369,7 +1373,7 @@ async def text_to_speech(request: TTSRequest):
                 },
                 json={
                     "text": request.text,
-                    "model_id": "eleven_monolingual_v1",
+                    "model_id": "eleven_flash_v2_5",
                     "voice_settings": {
                         "stability": 0.5,
                         "similarity_boost": 0.75,

@@ -19,3 +19,4 @@ data/chrome_profile/
 
 # Frontend build
 frontend/dist/
+.venv/

@@ -41,10 +41,25 @@ async function speakWithElevenLabs(text: string, voiceId: string = '21m00Tcm4Tlv
 
 // Fallback to Web Speech API
 function fallbackSpeak(text: string): void {
+  console.log('Using Web Speech API fallback for TTS');
   if ('speechSynthesis' in window) {
+    // Cancel any ongoing speech
+    speechSynthesis.cancel();
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.9;
+    utterance.volume = 1.0;
+
+    // Try to use a natural voice if available
+    const voices = speechSynthesis.getVoices();
+    const naturalVoice = voices.find(v => v.name.includes('Natural') || v.name.includes('Samantha'));
+    if (naturalVoice) {
+      utterance.voice = naturalVoice;
+    }
+
     speechSynthesis.speak(utterance);
+  } else {
+    console.error('Web Speech API not supported in this browser');
   }
 }
 
